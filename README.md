@@ -1,6 +1,6 @@
 # ani-es-rs
 
-Port en Rust de [ani-es](https://github.com/Zhuchii/ani-es) para usar [jkanime.net](https://jkanime.net) desde la terminal. Menu interactivo con fzf, logging, colores y reproduccion en mpv.
+Port en Rust de [ani-es](https://github.com/Zhuchii/ani-es) para usar [jkanime.net](https://jkanime.net) desde la terminal. Menu interactivo con fzf, logging, colores, cache y reproduccion en mpv.
 
 ## Creditos
 
@@ -47,6 +47,17 @@ timeout_seconds = 15
 ```
 
 Logs en `~/.local/share/ani-es-rs/logs/ani-es-rs.log`.
+
+## Desarrollo
+
+```bash
+cargo test
+```
+
+## Empaquetado
+
+- PKGBUILD para Arch/CachyOS incluido.
+- CI en `.github/workflows/ci.yml`.
 
 ## Licencia
 
