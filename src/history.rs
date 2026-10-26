@@ -17,6 +17,7 @@ mod tests {
                 last_cap: 5,
                 progress: "00:12:34".to_string(),
                 slug: Some("https://jkanime.net/bleach/".to_string()),
+                updated_at: Some("2026-01-01 00:00:00".to_string()),
             },
         );
 

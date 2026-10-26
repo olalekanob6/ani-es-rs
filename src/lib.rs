@@ -1,12 +1,15 @@
+pub mod cache;
 pub mod colors;
 pub mod config;
 pub mod history;
 pub mod logger;
 pub mod models;
 pub mod player;
+pub mod providers;
 pub mod scraper;
 pub mod ui;
 
+pub use cache::ScraperCache;
 pub use colors::{color, BOLD, CYAN, GREEN, MAGENTA, RED, RESET, YELLOW};
 pub use config::{Config, AppConfig};
 pub use history::{load_history, migrate_legacy_db_if_exists, save_history};

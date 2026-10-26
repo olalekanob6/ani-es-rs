@@ -8,6 +8,10 @@ use std::time::{Duration, Instant};
 const IPC_SOCKET: &str = "/tmp/ani-es-mpvsocket";
 
 pub fn play_video(url: &str, start: &str, title: &str) -> Result<String> {
+    if !is_interactive() {
+        return Err(anyhow::Error::msg("No hay terminal interactiva para reproducir video"));
+    }
+
     let _ = std::fs::remove_file(IPC_SOCKET);
     let socket_path = Path::new(IPC_SOCKET);
 
@@ -41,6 +45,12 @@ pub fn play_video(url: &str, start: &str, title: &str) -> Result<String> {
     let _ = child.wait();
 
     Ok(pos)
+}
+
+fn is_interactive() -> bool {
+    let no_fzf = std::env::var("ANI_ES_NO_FZF").ok().as_deref() == Some("1");
+    let has_tty = atty::is(atty::Stream::Stdin) && atty::is(atty::Stream::Stdout);
+    !no_fzf && has_tty
 }
 
 fn query_position() -> Option<String> {

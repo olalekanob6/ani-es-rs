@@ -1,12 +1,13 @@
-use ani_es_rs::{
-    color, load_history, migrate_legacy_db_if_exists, save_history, HistoryMap,
-    build_client, fetch_anime_detail, fetch_video_source, search_anime,
-    prompt_search, select_episode, select_from_list, select_post_episode_action,
-    play_video, Config, init as init_logger, info, BOLD, CYAN, GREEN, RED, RESET, YELLOW,
-};
 use anyhow::Result;
 use clap::Parser;
 use reqwest::blocking::Client;
+
+use ani_es_rs::{
+    color, load_history, migrate_legacy_db_if_exists, save_history, HistoryMap,
+    build_client, prompt_search, select_episode, select_from_list, select_post_episode_action,
+    play_video, Config, init as init_logger, info, BOLD, CYAN, GREEN, RED, RESET, YELLOW,
+    ScraperCache, providers::JkanimeProvider, providers::AnimeProvider,
+};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about = "Ver anime en español desde la terminal", long_about = None)]
@@ -38,25 +39,41 @@ fn main() -> Result<()> {
 
     migrate_legacy_db_if_exists()?;
     let mut history = load_history()?;
+    let mut cache = ScraperCache::new();
 
     let args = Args::parse();
     let client = build_client()?;
+    let provider = JkanimeProvider::new();
 
     if args.r#continue {
-        let _ = run_continue(&client, &mut history);
+        let _ = run_continue(&client, &mut history, &mut cache, &provider);
         return Ok(());
     }
 
     if args.query.is_some() || args.episode.is_some() || args.no_fzf {
         let query = args.query.unwrap_or_default();
-        let _ = run_search_and_play(&client, &mut history, &query, args.episode, args.no_fzf, args.auto_next);
+        let _ = run_search_and_play(
+            &client,
+            &mut history,
+            &query,
+            args.episode,
+            args.no_fzf,
+            args.auto_next,
+            &mut cache,
+            &provider,
+        );
         return Ok(());
     }
 
-    run_main_menu(&client, &mut history)
+    run_main_menu(&client, &mut history, &mut cache, &provider)
 }
 
-fn run_main_menu(client: &Client, history: &mut HistoryMap) -> Result<()> {
+fn run_main_menu(
+    client: &Client,
+    history: &mut HistoryMap,
+    cache: &mut ScraperCache,
+    provider: &JkanimeProvider,
+) -> Result<()> {
     loop {
         let options = vec![
             color("Buscar anime", BOLD),
@@ -86,10 +103,12 @@ fn run_main_menu(client: &Client, history: &mut HistoryMap) -> Result<()> {
                 if query.is_empty() {
                     continue;
                 }
-                let _ = run_search_and_play(client, history, &query, None, false, false);
+                let _ = run_search_and_play(
+                    client, history, &query, None, false, false, cache, provider,
+                );
             }
             "Continuar ultimo" => {
-                let _ = run_continue(client, history);
+                let _ = run_continue(client, history, cache, provider);
             }
             "Historial" => {
                 show_history(history);
@@ -130,7 +149,12 @@ fn show_history(history: &HistoryMap) {
     println!();
 }
 
-fn run_continue(client: &Client, history: &mut HistoryMap) {
+fn run_continue(
+    client: &Client,
+    history: &mut HistoryMap,
+    cache: &mut ScraperCache,
+    provider: &JkanimeProvider,
+) {
     let last = history
         .iter()
         .max_by_key(|(_, entry)| entry.last_cap)
@@ -142,7 +166,7 @@ fn run_continue(client: &Client, history: &mut HistoryMap) {
         let mut slug = history.get(&anime).and_then(|e| e.slug.clone());
 
         if slug.is_none() {
-            if let Ok(results) = search_anime(client, &anime) {
+            if let Ok(results) = provider.search(client, &anime) {
                 if let Some(first) = results.into_iter().find(|r| r.title == anime) {
                     slug = Some(first.slug);
                 }
@@ -150,7 +174,7 @@ fn run_continue(client: &Client, history: &mut HistoryMap) {
         }
 
         let slug = slug.as_deref().unwrap_or(&anime);
-        let _ = play_anime(client, history, &anime, slug, last_cap, &progress, false);
+        let _ = play_anime(client, history, &anime, slug, last_cap, &progress, false, cache, provider);
     } else {
         println!("{}", color("No hay historial de animes recientes.", YELLOW));
     }
@@ -163,8 +187,10 @@ fn run_search_and_play(
     episode: Option<u32>,
     no_fzf: bool,
     auto_next: bool,
+    cache: &mut ScraperCache,
+    provider: &JkanimeProvider,
 ) {
-    let results = match search_anime(client, query) {
+    let results = match provider.search(client, query) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("{}", color(format!("Error buscando: {}", e), RED));
@@ -198,7 +224,7 @@ fn run_search_and_play(
         None => return,
     };
 
-    let detail = match fetch_anime_detail(client, &selected.slug) {
+    let detail = match provider.detail(client, &selected.slug) {
         Ok(d) => d,
         Err(e) => {
             eprintln!("{}", color(format!("Error obteniendo detalle: {}", e), RED));
@@ -225,6 +251,8 @@ fn run_search_and_play(
             ep,
             if ep == last_cap { &progress } else { "00:00:00" },
             auto_next,
+            cache,
+            provider,
         );
     } else if last_cap > 0 && last_cap <= detail.total_episodes {
         let _ = play_anime(
@@ -235,6 +263,8 @@ fn run_search_and_play(
             last_cap,
             &progress,
             auto_next,
+            cache,
+            provider,
         );
     } else {
         let cap = match select_episode(detail.total_episodes, &color("Episodio: ", CYAN)) {
@@ -253,6 +283,8 @@ fn run_search_and_play(
             cap,
             "00:00:00",
             auto_next,
+            cache,
+            provider,
         );
     }
 }
@@ -265,15 +297,17 @@ fn play_anime(
     episode: u32,
     progress: &str,
     auto_next: bool,
+    _cache: &mut ScraperCache,
+    provider: &JkanimeProvider,
 ) {
-    let detail = match fetch_anime_detail(client, slug) {
+    let detail = match provider.detail(client, slug) {
         Ok(d) => d,
         Err(e) => {
             eprintln!("{}", color(format!("Error obteniendo detalle: {}", e), RED));
             return;
         }
     };
-    let source = match fetch_video_source(client, &detail.slug, episode) {
+    let source = match provider.video_source(client, &detail.slug, episode) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("{}", color(format!("Error obteniendo video: {}", e), RED));
@@ -295,7 +329,7 @@ fn play_anime(
     if auto_next {
         for next in (episode + 1)..=detail.total_episodes {
             println!("Siguiente: {}-{}", title, next);
-            let source = match fetch_video_source(client, &detail.slug, next) {
+            let source = match provider.video_source(client, &detail.slug, next) {
                 Ok(s) => s,
                 Err(e) => {
                     eprintln!("{}", color(format!("Error obteniendo video: {}", e), RED));
@@ -336,7 +370,7 @@ fn play_anime(
                     println!("{}", color("No hay más episodios.", YELLOW));
                     break;
                 }
-                let source = match fetch_video_source(client, &detail.slug, next) {
+                let source = match provider.video_source(client, &detail.slug, next) {
                     Ok(s) => s,
                     Err(e) => {
                         eprintln!("{}", color(format!("Error obteniendo video: {}", e), RED));
@@ -359,7 +393,7 @@ fn play_anime(
                     continue;
                 }
                 let prev = episode - 1;
-                let source = match fetch_video_source(client, &detail.slug, prev) {
+                let source = match provider.video_source(client, &detail.slug, prev) {
                     Ok(s) => s,
                     Err(e) => {
                         eprintln!("{}", color(format!("Error obteniendo video: {}", e), RED));
