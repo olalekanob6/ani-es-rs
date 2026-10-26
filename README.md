@@ -21,6 +21,16 @@ cargo build --release
 
 ## Instalar
 
+### Instalacion automatica
+
+```bash
+git clone https://github.com/olalekanob6/ani-es-rs.git && cd ani-es-rs && sudo ./install.sh
+```
+
+Eso clona el repo, compila en release y copia el binario a `/usr/local/bin/ani-es-rs`.
+
+### Instalacion manual
+
 ```bash
 sudo ./install.sh
 ```
