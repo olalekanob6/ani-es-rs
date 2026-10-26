@@ -1,7 +1,6 @@
 use ani_es_rs::{build_client, fetch_anime_detail, fetch_video_source, search_anime, ScraperCache};
 
-#[test]
-fn test_search_and_detail_fixtures() {
+fn main() {
     let client = build_client().expect("client");
     let mut cache = ScraperCache::new();
 
@@ -15,4 +14,5 @@ fn test_search_and_detail_fixtures() {
 
     let source = fetch_video_source(&client, &detail.slug, 1, &mut cache).expect("video source");
     assert!(source.url.starts_with("http"), "url invalida");
+    println!("OK");
 }
