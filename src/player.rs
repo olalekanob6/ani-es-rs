@@ -15,11 +15,17 @@ pub fn play_video(url: &str, start: &str, title: &str) -> Result<String> {
     let _ = std::fs::remove_file(IPC_SOCKET);
     let socket_path = Path::new(IPC_SOCKET);
 
+    let _ = std::io::stdout().flush();
+    print!("\x1B[2J\x1B[H");
+    let _ = std::io::stdout().flush();
+
     let mut cmd = Command::new("mpv");
     cmd.arg(format!("--input-ipc-server={}", IPC_SOCKET))
         .arg(format!("--start={}", start))
         .arg(format!("--force-media-title={}", title))
-        .arg(url);
+        .arg(url)
+        .stdout(std::fs::File::create("/dev/null")?)
+        .stderr(std::fs::File::create("/dev/null")?);
 
     let mut child = cmd.spawn()?;
     drop(cmd);
