@@ -8,7 +8,7 @@ CLI tool powered by **mpv + fzf**
 
 ⚡ Rápido | 🎯 Sin anuncios | 🖥️ Ligero | ❤️ Open Source
 
-> Inspired by [ani-es](https://github.com/Zhuchii/ani-es), focused on Spanish content. This is a Rust port/rewrite of the original bash script.
+> Inspired by [ani-es](https://github.com/Zhuchii/ani-es), focused on Spanish content. This is a Rust port of the original bash script.
 
 ---
 
@@ -30,44 +30,17 @@ CLI tool powered by **mpv + fzf**
 
 ## ⚡ Instalación
 
-<details><summary>Windows (WSL)</summary>
+<details><summary>Windows</summary>
 
-Abre Powershell y pega esto
-
-```bash
-wsl --install
-```
-
-Reiniciar el ordenador y luego en el Powershell ejecutar esto:
-
-```bash
-wsl --install -d Ubuntu
-```
-
-Luego desde la barra de tareas busca ubuntu y ejecuta
-
-Ya por ultimo solo queda instalar el script
-
-```bash
-cd ~/
+```powershell
 git clone https://github.com/olalekanob6/ani-es-rs.git
 cd ani-es-rs
-chmod +x install.sh
-./install.sh
+.\install.ps1
 ```
 
-Cerramos el ubuntu
+El script instalará Rust (si no está presente), mpv y fzf usando `winget` o descarga manual.
 
-### ⚠️ Nota sobre mpv
-Para poder usar mpv has de instalar mpv de descargarte mpv desde su [pagina oficial](https://mpv.io/installation/) y añadirlo al PATH de windows
-
-Si no sabes como hacerlo hecha un vistazo a [esta guia](https://github.com/Zhuchii/ani-es/wiki/C%C3%B3mo-descargar-y-a%C3%B1adir-mpv-al-PATH-en-Windows)
-
-Ya podras ejecutarlo desde el CMD de Windows usando:
-
-```bash
-wsl ani-es-rs
-```
+**Nota:** En Windows, asegúrate de que `mpv` y `fzf` estén en el `PATH` del sistema.
 
 </details>
 
@@ -125,7 +98,7 @@ Funciona en:
 * Fedora / RHEL / CentOS
 * Arch Linux
 * macOS
-* Windows (WSL)
+* Windows
 
 Gestores soportados:
 
@@ -135,6 +108,7 @@ Gestores soportados:
 * `zypper`
 * `pacman`
 * `brew` (macOS)
+* `winget` (Windows)
 
 ---
 
