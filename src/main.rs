@@ -1,13 +1,13 @@
 use anyhow::Result;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use reqwest::blocking::Client;
 
 use ani_es_rs::{
-    build_client, color, info, init as init_logger, load_history, migrate_legacy_db_if_exists,
-    models::AnimeSearchResult, play_video, prompt_search, providers::AnimeProvider,
-    providers::JkanimeProvider, save_history, select_episode, select_from_list,
-    select_post_episode_action, Config, HistoryMap, ScraperCache, BOLD, CYAN, GREEN, RED, RESET,
-    YELLOW,
+    add_watchlist, build_client, color, info, init as init_logger, load_history, load_watchlist,
+    mark_status, migrate_legacy_db_if_exists, models::AnimeSearchResult, play_video, prompt_search,
+    providers::AnimeProvider, providers::JkanimeProvider, remove_watchlist, save_history,
+    select_episode, select_from_list, select_post_episode_action, Config, HistoryMap, ScraperCache,
+    BOLD, CYAN, GREEN, RED, RESET, YELLOW, WatchlistStatus,
 };
 
 #[derive(Parser, Debug)]
@@ -31,6 +31,44 @@ struct Args {
     /// Reproducir automáticamente todos los episodios
     #[arg(long)]
     auto_next: bool,
+
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Gestiona tu lista de anime para ver
+    Watchlist {
+        #[command(subcommand)]
+        action: WatchlistAction,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum WatchlistAction {
+    /// Añade un anime a la watchlist
+    Add {
+        title: String,
+    },
+    /// Elimina un anime de la watchlist
+    Remove {
+        title: String,
+    },
+    /// Muestra la watchlist
+    List,
+    /// Marca como "viendo"
+    MarkWatching {
+        title: String,
+    },
+    /// Marca como "completado"
+    MarkCompleted {
+        title: String,
+    },
+    /// Marca como "planeado"
+    MarkPlanned {
+        title: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -45,6 +83,53 @@ fn main() -> Result<()> {
     let args = Args::parse();
     let client = build_client()?;
     let provider = JkanimeProvider::new();
+
+    if let Some(Commands::Watchlist { action }) = args.command {
+        let mut watchlist = load_watchlist()?;
+        match action {
+            WatchlistAction::Add { title } => {
+                let slug = title.to_lowercase().replace(' ', "-");
+                add_watchlist(&mut watchlist, title.clone(), slug)?;
+                println!("{}", color(format!("'{}' añadido a watchlist.", title), GREEN));
+            }
+            WatchlistAction::Remove { title } => {
+                remove_watchlist(&mut watchlist, &title)?;
+                println!("{}", color(format!("'{}' eliminado de watchlist.", title), GREEN));
+            }
+            WatchlistAction::List => {
+                if watchlist.is_empty() {
+                    println!("{}", color("Watchlist vacia.", YELLOW));
+                } else {
+                    for (title, entry) in watchlist.iter() {
+                        let status = match entry.status {
+                            WatchlistStatus::Planned => "Planeado",
+                            WatchlistStatus::Watching => "Viendo",
+                            WatchlistStatus::Completed => "Completado",
+                        };
+                        println!(
+                            "- {} [{}] (añadido: {})",
+                            color(title, CYAN),
+                            color(status, GREEN),
+                            entry.added_at
+                        );
+                    }
+                }
+            }
+            WatchlistAction::MarkWatching { title } => {
+                mark_status(&mut watchlist, &title, WatchlistStatus::Watching)?;
+                println!("{}", color(format!("'{}' marcado como viendo.", title), GREEN));
+            }
+            WatchlistAction::MarkCompleted { title } => {
+                mark_status(&mut watchlist, &title, WatchlistStatus::Completed)?;
+                println!("{}", color(format!("'{}' marcado como completado.", title), GREEN));
+            }
+            WatchlistAction::MarkPlanned { title } => {
+                mark_status(&mut watchlist, &title, WatchlistStatus::Planned)?;
+                println!("{}", color(format!("'{}' marcado como planeado.", title), GREEN));
+            }
+        }
+        return Ok(());
+    }
 
     if args.r#continue {
         let _ = run_continue(&client, &mut history, &mut cache, &provider);
@@ -80,6 +165,7 @@ fn run_main_menu(
             color("Buscar anime", BOLD),
             color("Continuar ultimo", BOLD),
             color("Historial", BOLD),
+            color("Watchlist", BOLD),
             color("Salir", BOLD),
         ];
 
@@ -120,6 +206,9 @@ fn run_main_menu(
             "Historial" => {
                 show_history(history);
                 let _ = prompt_search("Presiona enter para volver...");
+            }
+            "Watchlist" => {
+                show_watchlist_menu(client, history, cache, provider)?;
             }
             "Salir" => {
                 println!("{}", color("Hasta luego", GREEN));
@@ -490,6 +579,175 @@ fn play_anime(
             _ => break,
         }
     }
+}
+
+fn show_watchlist_menu(
+    client: &Client,
+    history: &mut HistoryMap,
+    cache: &mut ScraperCache,
+    provider: &JkanimeProvider,
+) -> Result<()> {
+    loop {
+        let mut watchlist = load_watchlist()?;
+        let options = vec![
+            color("Ver watchlist", BOLD),
+            color("Añadir anime", BOLD),
+            color("Volver", BOLD),
+        ];
+
+        let action = match select_from_list(&options, &color("Watchlist:", CYAN), "~8") {
+            Ok(Some(a)) => a,
+            Ok(None) => break,
+            Err(_) => {
+                eprintln!("{}", color("Error: fzf no esta instalado.", RED));
+                break;
+            }
+        };
+
+        match action.as_str() {
+            "Ver watchlist" => {
+                if watchlist.is_empty() {
+                    println!("{}", color("Watchlist vacia.", YELLOW));
+                    let _ = prompt_search("Presiona enter para volver...");
+                    continue;
+                }
+
+                let mut entries: Vec<_> = watchlist.iter().collect();
+                entries.sort_by_key(|(_, e)| &e.added_at);
+
+                let titles: Vec<String> = entries
+                    .iter()
+                    .map(|(title, entry)| {
+                        let status = match entry.status {
+                            WatchlistStatus::Planned => "Planeado",
+                            WatchlistStatus::Watching => "Viendo",
+                            WatchlistStatus::Completed => "Completado",
+                        };
+                        format!("{} [{}]", title, status)
+                    })
+                    .collect();
+
+                let selected = match select_from_list(&titles, "Selecciona anime:", "~10") {
+                    Ok(Some(s)) => s,
+                    Ok(None) => continue,
+                    Err(_) => continue,
+                };
+
+                let selected_title = if let Some((title, _)) = selected.rsplit_once(" [") {
+                    title
+                } else {
+                    selected.as_str()
+                };
+
+                let entry_options = vec![
+                    color("Reproducir", BOLD),
+                    color("Marcar como viendo", BOLD),
+                    color("Marcar como completado", BOLD),
+                    color("Marcar como planeado", BOLD),
+                    color("Eliminar", BOLD),
+                    color("Volver", BOLD),
+                ];
+
+                let entry_action =
+                    match select_from_list(&entry_options, &color("Accion:", CYAN), "~8") {
+                        Ok(Some(a)) => a,
+                        Ok(None) => continue,
+                        Err(_) => continue,
+                    };
+
+                match entry_action.as_str() {
+                    "Reproducir" => {
+                        let slug = watchlist
+                            .get(selected_title)
+                            .map(|e| e.slug.clone())
+                            .unwrap_or_default();
+                        if slug.is_empty() {
+                            println!("{}", color("Slug vacio para este anime.", RED));
+                            continue;
+                        }
+                        let _ = play_anime(
+                            client,
+                            history,
+                            selected_title,
+                            &slug,
+                            1,
+                            "00:00:00",
+                            true,
+                            cache,
+                            provider,
+                        );
+                    }
+                    "Marcar como viendo" => {
+                        let _ = mark_status(&mut watchlist, selected_title, WatchlistStatus::Watching);
+                    }
+                    "Marcar como completado" => {
+                        let _ = mark_status(&mut watchlist, selected_title, WatchlistStatus::Completed);
+                    }
+                    "Marcar como planeado" => {
+                        let _ = mark_status(&mut watchlist, selected_title, WatchlistStatus::Planned);
+                    }
+                    "Eliminar" => {
+                        let _ = remove_watchlist(&mut watchlist, selected_title);
+                    }
+                    _ => break,
+                }
+            }
+            "Añadir anime" => {
+                let title = match prompt_search("Titulo del anime:") {
+                    Ok(t) => t,
+                    Err(_) => continue,
+                };
+                if title.is_empty() {
+                    continue;
+                }
+                let results = match provider.search(client, &title) {
+                    Ok(r) => r,
+                    Err(_) => continue,
+                };
+                if results.is_empty() {
+                    println!("{}", color("No se encontraron resultados.", YELLOW));
+                    continue;
+                }
+
+                let selected = if results.len() == 1 {
+                    results.into_iter().next().unwrap()
+                } else {
+                    let options: Vec<String> = results
+                        .iter()
+                        .map(|r| format!("{} ({})", r.title, r.slug))
+                        .collect();
+                    let sel = select_from_list(&options, "Selecciona:", "~10");
+                    match sel {
+                        Ok(Some(s)) => {
+                            if let Some(inner) = s.strip_suffix(')') {
+                                if let Some((t, slug)) = inner.rsplit_once(" (") {
+                                    AnimeSearchResult {
+                                        title: t.to_string(),
+                                        slug: slug.to_string(),
+                                    }
+                                } else {
+                                    results.into_iter().next().unwrap()
+                                }
+                            } else {
+                                results.into_iter().next().unwrap()
+                            }
+                        }
+                        _ => continue,
+                    }
+                };
+
+                let mut wl = load_watchlist()?;
+                add_watchlist(&mut wl, selected.title.clone(), selected.slug.clone())?;
+                println!(
+                    "{}",
+                    color(format!("'{}' añadido a watchlist.", selected.title), GREEN)
+                );
+            }
+            _ => break,
+        }
+    }
+
+    Ok(())
 }
 
 fn no_fzf_flag_global() -> bool {

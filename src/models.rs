@@ -28,3 +28,27 @@ pub struct HistoryEntry {
 }
 
 pub type HistoryMap = std::collections::HashMap<String, HistoryEntry>;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WatchlistStatus {
+    Planned,
+    Watching,
+    Completed,
+}
+
+impl Default for WatchlistStatus {
+    fn default() -> Self {
+        WatchlistStatus::Planned
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WatchlistEntry {
+    pub slug: String,
+    pub status: WatchlistStatus,
+    pub added_at: String,
+    pub updated_at: String,
+}
+
+pub type WatchlistMap = std::collections::HashMap<String, WatchlistEntry>;
