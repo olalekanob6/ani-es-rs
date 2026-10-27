@@ -24,7 +24,7 @@ CLI tool powered by **mpv + fzf**
 * 💾 Guarda automáticamente el último episodio visto
 * ⚡ Interfaz interactiva con **fzf**
 * 🧠 Fallback automático para episodios en emisión
-* 📦 Compatible con múltiples distribuciones Linux, macOS y Windows
+* 📦 Compatible con Linux, macOS y Windows
 
 ---
 
@@ -99,6 +99,8 @@ Funciona en:
 * Arch Linux
 * macOS
 * Windows
+* Windows
+>>>>>>> 2618655f67c215aa7b7c24d2e2869123df7c8cdb
 
 Gestores soportados:
 
