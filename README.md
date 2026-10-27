@@ -8,7 +8,7 @@ CLI tool powered by **mpv + fzf**
 
 ⚡ Rápido | 🎯 Sin anuncios | 🖥️ Ligero | ❤️ Open Source
 
-> Inspired by [ani-es](https://github.com/Zhuchii/ani-es), focused on Spanish content. This is a Rust port/rewrite of the original bash script.
+> Inspired by [ani-es](https://github.com/Zhuchii/ani-es), focused on Spanish content. This is a Rust port of the original bash script.
 
 ---
 
@@ -24,7 +24,7 @@ CLI tool powered by **mpv + fzf**
 * 💾 Guarda automáticamente el último episodio visto
 * ⚡ Interfaz interactiva con **fzf**
 * 🧠 Fallback automático para episodios en emisión
-* 📦 Compatible con múltiples distribuciones Linux, macOS y Windows
+* 📦 Compatible con Linux, macOS y Windows
 
 ---
 
@@ -68,6 +68,20 @@ Ya podras ejecutarlo desde el CMD de Windows usando:
 ```bash
 wsl ani-es-rs
 ```
+
+</details>
+
+<details><summary>Windows (nativo)</summary>
+
+```powershell
+git clone https://github.com/olalekanob6/ani-es-rs.git
+cd ani-es-rs
+.\install.ps1
+```
+
+El script instalará Rust (si no está presente), mpv y fzf usando `winget` o descarga manual.
+
+**Nota:** En Windows, asegúrate de que `mpv` y `fzf` estén en el `PATH` del sistema.
 
 </details>
 
@@ -125,7 +139,7 @@ Funciona en:
 * Fedora / RHEL / CentOS
 * Arch Linux
 * macOS
-* Windows (WSL)
+* Windows (nativo y WSL)
 
 Gestores soportados:
 
@@ -135,6 +149,7 @@ Gestores soportados:
 * `zypper`
 * `pacman`
 * `brew` (macOS)
+* `winget` (Windows)
 
 ---
 
