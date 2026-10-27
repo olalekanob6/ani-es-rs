@@ -45,20 +45,20 @@ install_linux() {
     # Actualizar paquetes
     case $PKG_MANAGER in
         apt)
-            sudo -S -p '' apt-get update -y
-            sudo -S -p '' apt-get install -y mpv fzf curl jq
+            echo "Se requiere contraseña de sudo para instalar dependencias... (escribe tu contraseña y presiona Enter)" && sudo apt-get update -y
+            sudo apt-get install -y mpv fzf curl jq
             ;;
         dnf)
-            sudo -S -p '' dnf install -y mpv fzf curl jq
+            echo "Se requiere contraseña de sudo para instalar dependencias... (escribe tu contraseña y presiona Enter)" && sudo dnf install -y mpv fzf curl jq
             ;;
         yum)
-            sudo -S -p '' yum install -y mpv fzf curl jq
+            echo "Se requiere contraseña de sudo para instalar dependencias... (escribe tu contraseña y presiona Enter)" && sudo yum install -y mpv fzf curl jq
             ;;
         zypper)
-            sudo -S -p '' zypper install -y mpv fzf curl jq
+            echo "Se requiere contraseña de sudo para instalar dependencias... (escribe tu contraseña y presiona Enter)" && sudo zypper install -y mpv fzf curl jq
             ;;
         pacman)
-            sudo -S -p '' pacman -S --noconfirm mpv fzf curl jq
+            echo "Se requiere contraseña de sudo para instalar dependencias... (escribe tu contraseña y presiona Enter)" && sudo pacman -S --noconfirm mpv fzf curl jq
             ;;
     esac
     

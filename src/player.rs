@@ -19,6 +19,9 @@ pub fn play_video(url: &str, start: &str, title: &str) -> Result<String> {
     let mut cmd = Command::new("mpv");
     cmd.arg(format!("--input-ipc-server={}:{}", IPC_HOST, IPC_PORT))
         .arg(format!("--start={}", start))
+        .arg("--really-quiet")
+        .arg("--no-terminal")
+        .arg("--msg-level=ffmpeg=no")
         .arg(format!("--force-media-title={}", title))
         .arg(url)
         .stdout(std::process::Stdio::null())
