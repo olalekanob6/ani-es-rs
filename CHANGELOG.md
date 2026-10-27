@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.1.2] - 2026-10-27
+
+### Added
+- Watchlist con subcomandos CLI: `ani-es-rs watchlist add/remove/list/mark-watching/mark-completed/mark-planned`.
+- Menú interactivo de watchlist en el modo fzf.
+- Auto-next episode ya estaba presente; ahora también se puede invocar desde watchlist.
+- Tests unitarios para parsing de scraper (`search`, `detail`, `jkplayer`, `jkphp`, `mediafire`).
+- Nota de compatibilidad Windows en README.
+
+### Changed
+- IPC de mpv usa puerto dinámico en lugar de `12345` hardcodeado.
+- Limpieza de artefactos de debug (`examples/`).
+- Mejora de mensajes en `--continue` cuando falta slug en el historial.
+
+### Fixed
+- Redirección de salida de mpv y flags de silencio para reducir ruido en terminal.
+
 ## [0.1.1] - 2026-10-27
 
 ### Added

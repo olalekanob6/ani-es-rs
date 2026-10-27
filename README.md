@@ -25,6 +25,9 @@ CLI tool powered by **mpv + fzf**
 * ⚡ Interfaz interactiva con **fzf**
 * 🧠 Fallback automático para episodios en emisión
 * 📦 Compatible con Linux, macOS y Windows
+* 🎯 Modo no interactivo: `--no-fzf`, `--episode`, `--auto-next`
+* 📋 Watchlist: agrega, elimina y marca animes como planeado / viendo / completado
+* 🔄 Auto-next episode: continúa automáticamente con el siguiente episodio
 
 ---
 
@@ -101,8 +104,6 @@ Funciona en:
 * Arch Linux
 * macOS
 * Windows
-* Windows
->>>>>>> 2618655f67c215aa7b7c24d2e2869123df7c8cdb
 
 Gestores soportados:
 
@@ -173,6 +174,13 @@ Esto ayuda mucho a que más gente lo descubra 🙌
 ---
 
 ## 📝 Changelog
+
+### 0.1.2
+- Watchlist con subcomandos CLI y menú interactivo.
+- Auto-next episode.
+- IPC dinámico de mpv y menor ruido en terminal.
+- Tests unitarios de scraper.
+- Nota de compatibilidad Windows en README.
 
 ### 0.1.0
 - Port inicial desde ani-es (bash) a Rust
