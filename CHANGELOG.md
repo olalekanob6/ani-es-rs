@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.1] - 2026-10-27
+
+### Added
+- Tests unitarios para parsing de scraper (`search`, `detail`, `jkplayer`, `jkphp`, `mediafire`).
+- Nota de compatibilidad Windows en README.
+
+### Changed
+- IPC de mpv usa puerto dinámico en lugar de `12345` hardcodeado.
+- Limpieza de artefactos de debug (`examples/`).
+- Mejora de mensajes en `--continue` cuando falta slug en el historial.
+
+### Fixed
+- Redirección de salida de mpv y flags de silencio para reducir ruido en terminal.
+
 ## [0.1.0] - 2026-10-26
 
 ### Added
