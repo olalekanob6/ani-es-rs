@@ -1,6 +1,6 @@
 [package]
 name = "ani-es-rs"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "CLI para ver anime en español desde la terminal (Rust port de ani-es)"
 authors = ["olal3"]

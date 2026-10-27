@@ -43,7 +43,11 @@ impl LoggerState {
 
         let line = format!("{} {}\n", prefix, msg);
 
-        if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&self.file_path) {
+        if let Ok(mut f) = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.file_path)
+        {
             let _ = f.write_all(line.as_bytes());
         }
     }

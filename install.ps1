@@ -40,6 +40,15 @@ if (Get-Command wsl.exe -ErrorAction SilentlyContinue) {
 Write-Host "Sistema detectado: Windows"
 Write-Host ""
 
+# Verificar permisos de administrador
+$currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+$isAdmin = $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+if (-not $isAdmin) {
+    Write-Host "Se requieren permisos de administrador para instalar dependencias... (acepta el aviso UAC si aparece)"
+    Write-Host ""
+}
+
 # Función para verificar si un comando existe
 function Test-Command {
     param([string]$Command)
