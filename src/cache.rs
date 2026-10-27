@@ -51,13 +51,8 @@ impl ScraperCache {
             .map(|d| d.as_secs() + ttl_secs)
             .unwrap_or(0);
 
-        self.data.insert(
-            key.clone(),
-            CacheEntry {
-                value,
-                expires_at,
-            },
-        );
+        self.data
+            .insert(key.clone(), CacheEntry { value, expires_at });
         self.persist();
     }
 

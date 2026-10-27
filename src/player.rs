@@ -1,51 +1,48 @@
 use anyhow::Result;
 use std::io::{BufRead, BufReader, Write};
-use std::net::TcpStream;
-use std::process::Command;
+use std::net::{TcpListener, TcpStream};
+use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 const IPC_HOST: &str = "127.0.0.1";
-const IPC_PORT: u16 = 12345;
 
 pub fn play_video(url: &str, start: &str, title: &str) -> Result<String> {
     if !is_interactive() {
-        return Err(anyhow::Error::msg("No hay terminal interactiva para reproducir video"));
+        return Err(anyhow::Error::msg(
+            "No hay terminal interactiva para reproducir video",
+        ));
     }
 
     let _ = std::io::stdout().flush();
     print!("\x1B[2J\x1B[H");
     let _ = std::io::stdout().flush();
 
+    let listener = TcpListener::bind((IPC_HOST, 0)).expect("bind IPC port");
+    let ipc_port = listener.local_addr().expect("local addr").port();
+    let ipc_addr = format!("{}:{}", IPC_HOST, ipc_port);
+
     let mut cmd = Command::new("mpv");
-    cmd.arg(format!("--input-ipc-server={}:{}", IPC_HOST, IPC_PORT))
+    cmd.arg(format!("--input-ipc-server={}", ipc_addr))
         .arg(format!("--start={}", start))
         .arg("--really-quiet")
         .arg("--no-terminal")
         .arg("--msg-level=ffmpeg=no")
         .arg(format!("--force-media-title={}", title))
         .arg(url)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
     let mut child = cmd.spawn()?;
     drop(cmd);
 
-    let start_instant = Instant::now();
-    let timeout = Duration::from_secs(2);
+    let _start_instant = Instant::now();
+    let _timeout = Duration::from_secs(2);
 
-    let pos = loop {
-        if start_instant.elapsed() > timeout {
-            break None;
-        }
-        if TcpStream::connect((IPC_HOST, IPC_PORT)).is_ok() {
-            break query_position();
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    };
+    let _ = listener.set_nonblocking(true);
 
-    let pos = match pos {
-        Some(p) => p,
-        None => start.to_string(),
+    let pos = match listener.accept() {
+        Ok((stream, _)) => query_position_from_stream(stream).unwrap_or_else(|| start.to_string()),
+        Err(_) => start.to_string(),
     };
 
     let _ = child.wait();
@@ -59,9 +56,11 @@ fn is_interactive() -> bool {
     !no_fzf && has_tty
 }
 
-fn query_position() -> Option<String> {
-    let mut stream = TcpStream::connect((IPC_HOST, IPC_PORT)).ok()?;
-    let cmd = format!("{}\n", r#"{"command":["get_property","time-pos"],"request_id":1}"#);
+fn query_position_from_stream(mut stream: TcpStream) -> Option<String> {
+    let cmd = format!(
+        "{}\n",
+        r#"{"command":["get_property","time-pos"],"request_id":1}"#
+    );
     stream.write_all(cmd.as_bytes()).ok()?;
 
     let reader = BufReader::new(stream);

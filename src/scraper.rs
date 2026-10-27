@@ -12,10 +12,19 @@ pub fn search_anime(client: &Client, query: &str) -> Result<Vec<AnimeSearchResul
     JkanimeProvider.search(client, query)
 }
 
-pub fn fetch_anime_detail(client: &Client, slug: &str, _cache: &mut crate::ScraperCache) -> Result<AnimeDetail> {
+pub fn fetch_anime_detail(
+    client: &Client,
+    slug: &str,
+    _cache: &mut crate::ScraperCache,
+) -> Result<AnimeDetail> {
     JkanimeProvider.detail(client, slug)
 }
 
-pub fn fetch_video_source(client: &Client, anime_url: &str, episode_number: u32, _cache: &mut crate::ScraperCache) -> Result<VideoSource> {
+pub fn fetch_video_source(
+    client: &Client,
+    anime_url: &str,
+    episode_number: u32,
+    _cache: &mut crate::ScraperCache,
+) -> Result<VideoSource> {
     JkanimeProvider.video_source(client, anime_url, episode_number)
 }

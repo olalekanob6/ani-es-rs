@@ -3,10 +3,11 @@ use clap::Parser;
 use reqwest::blocking::Client;
 
 use ani_es_rs::{
-    color, load_history, migrate_legacy_db_if_exists, save_history, HistoryMap,
-    build_client, prompt_search, select_episode, select_from_list, select_post_episode_action,
-    play_video, Config, init as init_logger, info, BOLD, CYAN, GREEN, RED, RESET, YELLOW,
-    ScraperCache, providers::JkanimeProvider, providers::AnimeProvider,
+    build_client, color, info, init as init_logger, load_history, migrate_legacy_db_if_exists,
+    models::AnimeSearchResult, play_video, prompt_search, providers::AnimeProvider,
+    providers::JkanimeProvider, save_history, select_episode, select_from_list,
+    select_post_episode_action, Config, HistoryMap, ScraperCache, BOLD, CYAN, GREEN, RED, RESET,
+    YELLOW,
 };
 
 #[derive(Parser, Debug)]
@@ -89,7 +90,13 @@ fn run_main_menu(
                 return Ok(());
             }
             Err(_) => {
-                eprintln!("{}", color("Error: fzf no esta instalado. Instalalo para usar el menu interactivo.", RED));
+                eprintln!(
+                    "{}",
+                    color(
+                        "Error: fzf no esta instalado. Instalalo para usar el menu interactivo.",
+                        RED
+                    )
+                );
                 std::process::exit(1);
             }
         };
@@ -166,15 +173,55 @@ fn run_continue(
         let mut slug = history.get(&anime).and_then(|e| e.slug.clone());
 
         if slug.is_none() {
+            println!("{}", color("Buscando anime para continuar...", YELLOW));
             if let Ok(results) = provider.search(client, &anime) {
-                if let Some(first) = results.into_iter().find(|r| r.title == anime) {
-                    slug = Some(first.slug);
+                if results.is_empty() {
+                    println!(
+                        "{}",
+                        color("No se encontraron resultados para continuar.", RED)
+                    );
+                    return;
                 }
+                let selected = if results.len() == 1 {
+                    results.into_iter().next().unwrap()
+                } else {
+                    let options: Vec<String> = results
+                        .iter()
+                        .map(|r| format!("{} ({})", r.title, r.slug))
+                        .collect();
+                    let selected =
+                        select_from_list(&options, "Selecciona el anime para continuar:", "40%");
+                    if let Ok(Some(sel)) = selected {
+                        if let Some(inner) = sel.strip_suffix(')') {
+                            if let Some((title, slug)) = inner.rsplit_once(" (") {
+                                AnimeSearchResult {
+                                    title: title.to_string(),
+                                    slug: slug.to_string(),
+                                }
+                            } else {
+                                results.into_iter().next().unwrap()
+                            }
+                        } else {
+                            results.into_iter().next().unwrap()
+                        }
+                    } else {
+                        return;
+                    }
+                };
+                slug = Some(selected.slug);
+            } else {
+                println!(
+                    "{}",
+                    color("No se pudo buscar el anime para continuar.", RED)
+                );
+                return;
             }
         }
 
         let slug = slug.as_deref().unwrap_or(&anime);
-        let _ = play_anime(client, history, &anime, slug, last_cap, &progress, false, cache, provider);
+        let _ = play_anime(
+            client, history, &anime, slug, last_cap, &progress, false, cache, provider,
+        );
     } else {
         println!("{}", color("No hay historial de animes recientes.", YELLOW));
     }
@@ -232,7 +279,10 @@ fn run_search_and_play(
         }
     };
     println!("Anime: {}", color(&detail.title, BOLD));
-    println!("Episodios: {}", color(detail.total_episodes.to_string(), GREEN));
+    println!(
+        "Episodios: {}",
+        color(detail.total_episodes.to_string(), GREEN)
+    );
 
     let last_cap = ani_es_rs::history::get_last_cap(history, &detail.title);
     let progress = ani_es_rs::history::get_progress(history, &detail.title);
@@ -249,7 +299,11 @@ fn run_search_and_play(
             &detail.title,
             &detail.slug,
             ep,
-            if ep == last_cap { &progress } else { "00:00:00" },
+            if ep == last_cap {
+                &progress
+            } else {
+                "00:00:00"
+            },
             auto_next,
             cache,
             provider,
@@ -343,7 +397,13 @@ fn play_anime(
                     return;
                 }
             };
-            ani_es_rs::history::update_history(history, title, next, &pos, Some(detail.slug.clone()));
+            ani_es_rs::history::update_history(
+                history,
+                title,
+                next,
+                &pos,
+                Some(detail.slug.clone()),
+            );
             let _ = save_history(history);
         }
         return;
@@ -377,14 +437,21 @@ fn play_anime(
                         break;
                     }
                 };
-                let pos = match play_video(&source.url, "00:00:00", &format!("{}-{}", title, next)) {
+                let pos = match play_video(&source.url, "00:00:00", &format!("{}-{}", title, next))
+                {
                     Ok(p) => p,
                     Err(e) => {
                         eprintln!("{}", color(format!("Error reproduciendo: {}", e), RED));
                         break;
                     }
                 };
-                ani_es_rs::history::update_history(history, title, next, &pos, Some(detail.slug.clone()));
+                ani_es_rs::history::update_history(
+                    history,
+                    title,
+                    next,
+                    &pos,
+                    Some(detail.slug.clone()),
+                );
                 let _ = save_history(history);
             }
             "Retroceder" => {
@@ -400,14 +467,21 @@ fn play_anime(
                         break;
                     }
                 };
-                let pos = match play_video(&source.url, "00:00:00", &format!("{}-{}", title, prev)) {
+                let pos = match play_video(&source.url, "00:00:00", &format!("{}-{}", title, prev))
+                {
                     Ok(p) => p,
                     Err(e) => {
                         eprintln!("{}", color(format!("Error reproduciendo: {}", e), RED));
                         break;
                     }
                 };
-                ani_es_rs::history::update_history(history, title, prev, &pos, Some(detail.slug.clone()));
+                ani_es_rs::history::update_history(
+                    history,
+                    title,
+                    prev,
+                    &pos,
+                    Some(detail.slug.clone()),
+                );
                 let _ = save_history(history);
             }
             "Atras" => {
@@ -420,5 +494,8 @@ fn play_anime(
 
 fn no_fzf_flag_global() -> bool {
     use std::env;
-    env::var("ANI_ES_NO_FZF").ok().map(|v| v == "1").unwrap_or(false)
+    env::var("ANI_ES_NO_FZF")
+        .ok()
+        .map(|v| v == "1")
+        .unwrap_or(false)
 }

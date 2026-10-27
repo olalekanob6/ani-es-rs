@@ -42,6 +42,8 @@ El script instalará Rust (si no está presente), mpv y fzf usando `winget` o de
 
 **Nota:** En Windows, asegúrate de que `mpv` y `fzf` estén en el `PATH` del sistema.
 
+**Probado en:** Windows 10/11 con PowerShell 5.1+ y `mpv`/`fzf` en `PATH`.
+
 </details>
 
 <details><summary>Linux</summary>

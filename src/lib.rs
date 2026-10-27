@@ -11,7 +11,7 @@ pub mod ui;
 
 pub use cache::ScraperCache;
 pub use colors::{color, BOLD, CYAN, GREEN, MAGENTA, RED, RESET, YELLOW};
-pub use config::{Config, AppConfig};
+pub use config::{AppConfig, Config};
 pub use history::{load_history, migrate_legacy_db_if_exists, save_history};
 pub use logger::{error, info, init, warn, Level};
 pub use models::HistoryMap;
