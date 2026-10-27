@@ -1,64 +1,204 @@
 # ani-es-rs
 
-Port en Rust de [ani-es](https://github.com/Zhuchii/ani-es) para usar [jkanime.net](https://jkanime.net) desde la terminal. Menu interactivo con fzf, logging, colores, cache y reproduccion en mpv.
+> Port en Rust de [ani-es](https://github.com/Zhuchii/ani-es) para ver anime en español desde la terminal.
 
-## Creditos
+CLI tool powered by **mpv + fzf**
 
-Este proyecto es un fork/port en Rust de [ani-es](https://github.com/Zhuchii/ani-es) creado por [Zhuchii](https://github.com/Zhuchii). Todo el merito del scraper y la logica original es de el.
+⚡ Fast | 🎯 No ads | 🖥️ Lightweight | ❤️ Open Source
 
-## Requisitos
+⚡ Rápido | 🎯 Sin anuncios | 🖥️ Ligero | ❤️ Open Source
 
-- Rust 1.70+
-- mpv
-- fzf
+> Inspired by [ani-es](https://github.com/Zhuchii/ani-es), focused on Spanish content. This is a Rust port/rewrite of the original bash script.
 
-## Instalar
+---
 
-```bash
-git clone https://github.com/olalekanob6/ani-es-rs.git && cd ani-es-rs && sudo ./install.sh
-```
+**Search, stream and continue watching anime — all from your terminal.**
 
-O compilar manual:
+---
 
-```bash
-cargo build --release
-sudo ./install.sh
-```
+## ✨ Features
 
-## Uso
+* 🔍 Búsqueda de animes desde la terminal
+* 📺 Reproducción directa con **mpv**
+* ⏭️ Navegación entre episodios (siguiente / anterior)
+* 💾 Guarda automáticamente el último episodio visto
+* ⚡ Interfaz interactiva con **fzf**
+* 🧠 Fallback automático para episodios en emisión
+* 📦 Compatible con múltiples distribuciones Linux, macOS y Windows
 
-```bash
-ani-es-rs                  # menu interactivo
-ani-es-rs "naruto"         # busqueda directa
-ani-es-rs -c               # continuar ultimo
-ani-es-rs --no-fzf --episode 1 bleach
-ani-es-rs --auto-next naruto
-```
+---
 
-## Configuracion
+## ⚡ Instalación
 
-`~/.config/ani-es-rs/config.toml`
+<details><summary>Windows (WSL)</summary>
 
-```toml
-[app]
-log_level = "info"
-color = true
-timeout_seconds = 15
-```
-
-Logs en `~/.local/share/ani-es-rs/logs/ani-es-rs.log`.
-
-## Desarrollo
+Abre Powershell y pega esto
 
 ```bash
-cargo test
+wsl --install
 ```
 
-## Empaquetado
+Reiniciar el ordenador y luego en el Powershell ejecutar esto:
 
-- PKGBUILD para Arch/CachyOS incluido.
-- CI en `.github/workflows/ci.yml`.
+```bash
+wsl --install -d Ubuntu
+```
 
-## Licencia
+Luego desde la barra de tareas busca ubuntu y ejecuta
 
-MIT
+Ya por ultimo solo queda instalar el script
+
+```bash
+cd ~/
+git clone https://github.com/olalekanob6/ani-es-rs.git
+cd ani-es-rs
+chmod +x install.sh
+./install.sh
+```
+
+Cerramos el ubuntu
+
+### ⚠️ Nota sobre mpv
+Para poder usar mpv has de instalar mpv de descargarte mpv desde su [pagina oficial](https://mpv.io/installation/) y añadirlo al PATH de windows
+
+Si no sabes como hacerlo hecha un vistazo a [esta guia](https://github.com/Zhuchii/ani-es/wiki/C%C3%B3mo-descargar-y-a%C3%B1adir-mpv-al-PATH-en-Windows)
+
+Ya podras ejecutarlo desde el CMD de Windows usando:
+
+```bash
+wsl ani-es-rs
+```
+
+</details>
+
+<details><summary>Linux</summary>
+
+```bash
+git clone https://github.com/olalekanob6/ani-es-rs.git
+cd ani-es-rs
+chmod +x install.sh
+./install.sh
+```
+
+Después podrás usar:
+
+```bash
+ani-es-rs
+```
+
+</details>
+
+<details><summary>macOS</summary>
+
+```bash
+git clone https://github.com/olalekanob6/ani-es-rs.git
+cd ani-es-rs
+chmod +x install.sh
+./install.sh
+```
+
+El script usará **Homebrew** para instalar las dependencias.
+
+</details>
+
+---
+
+## 🖥️ Uso
+
+```bash
+ani-es-rs
+```
+
+O directamente:
+
+```bash
+ani-es-rs naruto
+```
+
+---
+
+## 📦 Compatibilidad
+
+Funciona en:
+
+* Debian / Ubuntu
+* Fedora / RHEL / CentOS
+* Arch Linux
+* macOS
+* Windows (WSL)
+
+Gestores soportados:
+
+* `apt-get`
+* `dnf`
+* `yum`
+* `zypper`
+* `pacman`
+* `brew` (macOS)
+
+---
+
+## 🔧 Dependencias
+
+* `rustc` / `cargo` (1.70+)
+* `mpv`
+* `fzf`
+* `curl`
+* `jq`
+
+El instalador se encarga de todo automáticamente.
+
+---
+
+## 💾 Historial
+
+El script guarda automáticamente:
+
+* Último anime visto
+* Último episodio
+
+Para que puedas continuar fácilmente después.
+
+---
+
+## ❌ Desinstalar
+
+```bash
+./uninstall.sh
+```
+
+---
+
+## ⚠️ Nota
+
+Este proyecto es solo una interfaz CLI para interactuar con sitios de streaming.
+No aloja contenido propio.
+
+---
+
+## ❤️ Contribuir
+
+Las contribuciones son bienvenidas:
+
+* Reportar bugs
+* Sugerir features
+* Hacer pull requests
+
+---
+
+## ⭐ Apoya el proyecto
+
+Si te gusta el proyecto, dale una estrella ⭐
+
+Esto ayuda mucho a que más gente lo descubra 🙌
+
+---
+
+## 📝 Changelog
+
+### 0.1.0
+- Port inicial desde ani-es (bash) a Rust
+- Búsqueda de anime en jkanime.net
+- Reproducción con mpv
+- Historial de episodios vistos
+- Soporte para Linux, macOS y Windows

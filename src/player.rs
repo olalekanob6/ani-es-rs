@@ -1,31 +1,28 @@
 use anyhow::Result;
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::UnixStream;
-use std::path::Path;
+use std::net::TcpStream;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-const IPC_SOCKET: &str = "/tmp/ani-es-mpvsocket";
+const IPC_HOST: &str = "127.0.0.1";
+const IPC_PORT: u16 = 12345;
 
 pub fn play_video(url: &str, start: &str, title: &str) -> Result<String> {
     if !is_interactive() {
         return Err(anyhow::Error::msg("No hay terminal interactiva para reproducir video"));
     }
 
-    let _ = std::fs::remove_file(IPC_SOCKET);
-    let socket_path = Path::new(IPC_SOCKET);
-
     let _ = std::io::stdout().flush();
     print!("\x1B[2J\x1B[H");
     let _ = std::io::stdout().flush();
 
     let mut cmd = Command::new("mpv");
-    cmd.arg(format!("--input-ipc-server={}", IPC_SOCKET))
+    cmd.arg(format!("--input-ipc-server={}:{}", IPC_HOST, IPC_PORT))
         .arg(format!("--start={}", start))
         .arg(format!("--force-media-title={}", title))
         .arg(url)
-        .stdout(std::fs::File::create("/dev/null")?)
-        .stderr(std::fs::File::create("/dev/null")?);
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
 
     let mut child = cmd.spawn()?;
     drop(cmd);
@@ -37,7 +34,7 @@ pub fn play_video(url: &str, start: &str, title: &str) -> Result<String> {
         if start_instant.elapsed() > timeout {
             break None;
         }
-        if socket_path.exists() {
+        if TcpStream::connect((IPC_HOST, IPC_PORT)).is_ok() {
             break query_position();
         }
         std::thread::sleep(Duration::from_millis(100));
@@ -60,7 +57,7 @@ fn is_interactive() -> bool {
 }
 
 fn query_position() -> Option<String> {
-    let mut stream = UnixStream::connect(IPC_SOCKET).ok()?;
+    let mut stream = TcpStream::connect((IPC_HOST, IPC_PORT)).ok()?;
     let cmd = format!("{}\n", r#"{"command":["get_property","time-pos"],"request_id":1}"#);
     stream.write_all(cmd.as_bytes()).ok()?;
 
