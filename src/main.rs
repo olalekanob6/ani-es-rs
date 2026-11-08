@@ -466,7 +466,7 @@ fn play_anime(
     history: &mut HistoryMap,
     title: &str,
     slug: &str,
-    episode: u32,
+    mut episode: u32,
     progress: &str,
     auto_next: bool,
     no_fzf: bool,
@@ -552,10 +552,11 @@ fn play_anime(
                         break;
                     }
                 };
+                episode = next;
                 ani_es_rs::history::update_history(
                     history,
                     title,
-                    next,
+                    episode,
                     &pos,
                     Some(detail.slug.clone()),
                 );
@@ -582,10 +583,11 @@ fn play_anime(
                         break;
                     }
                 };
+                episode = prev;
                 ani_es_rs::history::update_history(
                     history,
                     title,
-                    prev,
+                    episode,
                     &pos,
                     Some(detail.slug.clone()),
                 );
@@ -688,13 +690,15 @@ fn show_watchlist_menu(
                             println!("{}", color("Slug vacio para este anime.", RED));
                             continue;
                         }
+                        let last_cap = ani_es_rs::history::get_last_cap(history, selected_title);
+                        let progress = ani_es_rs::history::get_progress(history, selected_title);
                         play_anime(
                             client,
                             history,
                             selected_title,
                             &slug,
-                            1,
-                            "00:00:00",
+                            last_cap.max(1),
+                            &progress,
                             true,
                             false,
                             cache,

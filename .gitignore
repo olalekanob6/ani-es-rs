@@ -1,5 +1,4 @@
 /target
-Cargo.lock
 .idea/
 .vscode/
 *.swp
@@ -7,3 +6,4 @@ Cargo.lock
 *~
 .DS_Store
 Thumbs.db
+*.orig

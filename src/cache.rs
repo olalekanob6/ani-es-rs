@@ -28,7 +28,8 @@ pub struct ScraperCache {
 impl ScraperCache {
     pub fn new() -> Self {
         let path = cache_dir();
-        let data = load(&path);
+        let mut data = load(&path);
+        data.retain(|_, entry| entry.is_valid());
         Self { path, data }
     }
 

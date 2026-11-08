@@ -43,7 +43,7 @@ impl JkanimeProvider {
         headers.insert(
             USER_AGENT,
             HeaderValue::from_static(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
             ),
         );
 
@@ -183,26 +183,12 @@ fn parse_detail_with_client(client: &Client, body: &str, url: &str) -> Result<An
         .collect::<Vec<_>>();
     let episode_api_base = find_episode_endpoint(&script_text);
 
-    let total_episodes = if let Some(ref api_base) = episode_api_base {
-        let token = csrf_token.as_deref().unwrap_or("");
-        let form = vec![("_token", token)];
-        let api_url = resolve_provider_page_url(&reqwest::Url::parse(url)?, api_base)?;
-        let response = client
-            .post(api_url)
-            .header("X-Requested-With", "XMLHttpRequest")
-            .header("X-CSRF-TOKEN", token)
-            .form(&form)
-            .send()?
-            .error_for_status()?;
-        let json = response.text()?;
-        let v: serde_json::Value = serde_json::from_str(&json)?;
-        v.get("total")
-            .and_then(|total| total.as_u64())
-            .and_then(|total| u32::try_from(total).ok())
-            .unwrap_or(0)
-    } else {
-        0
-    };
+    let total_episodes = fetch_total_episodes(
+        client,
+        url,
+        episode_api_base.as_deref(),
+        csrf_token.as_deref(),
+    );
 
     let title_selector = scraper::Selector::parse(".anime_info h3")
         .map_err(|error| anyhow!("Selector inválido: {error:?}"))?;
@@ -219,20 +205,61 @@ fn parse_detail_with_client(client: &Client, body: &str, url: &str) -> Result<An
     })
 }
 
+fn fetch_total_episodes(
+    client: &Client,
+    url: &str,
+    api_base: Option<&str>,
+    csrf_token: Option<&str>,
+) -> u32 {
+    // Best-effort: cualquier fallo (sin cookies -> 419, red, JSON)
+    // degrada a 0 en vez de abortar el detalle. El llamador decide
+    // no cachear ese resultado (ver fetch_anime_detail).
+    let Some(api_base) = api_base else {
+        return 0;
+    };
+    let token = csrf_token.unwrap_or("");
+    let form = vec![("_token", token)];
+    let Ok(api_url) =
+        resolve_provider_page_url(&reqwest::Url::parse(url).expect("url parse"), api_base)
+    else {
+        return 0;
+    };
+    let Ok(response) = client
+        .post(api_url)
+        .header("X-Requested-With", "XMLHttpRequest")
+        .header("X-CSRF-TOKEN", token)
+        .form(&form)
+        .send()
+    else {
+        return 0;
+    };
+    let Ok(response) = response.error_for_status() else {
+        return 0;
+    };
+    let Ok(json) = response.text() else {
+        return 0;
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&json) else {
+        return 0;
+    };
+    v.get("total")
+        .and_then(|total| total.as_u64())
+        .and_then(|total| u32::try_from(total).ok())
+        .unwrap_or(0)
+}
+
 fn find_episode_endpoint(scripts: &[String]) -> Option<String> {
-    ["/ajax/episodes/", "/ajax/search_episode/"]
-        .iter()
-        .find_map(|endpoint| {
-            scripts.iter().find_map(|script| {
-                let position = script.find(endpoint)?;
-                let before = &script[..position];
-                let quote = before.chars().rev().find(|ch| *ch == '\'' || *ch == '"')?;
-                let start = before.rfind(quote)?;
-                let after = &script[start + quote.len_utf8()..];
-                let end = after.find(quote)?;
-                Some(after[..end].to_string())
-            })
+    ["/ajax/episodes/"].iter().find_map(|endpoint| {
+        scripts.iter().find_map(|script| {
+            let position = script.find(endpoint)?;
+            let before = &script[..position];
+            let quote = before.chars().rev().find(|ch| *ch == '\'' || *ch == '"')?;
+            let start = before.rfind(quote)?;
+            let after = &script[start + quote.len_utf8()..];
+            let end = after.find(quote)?;
+            Some(after[..end].to_string())
         })
+    })
 }
 
 fn resolve_provider_url(base: &reqwest::Url, value: &str) -> Result<reqwest::Url> {
@@ -310,10 +337,34 @@ fn parse_jkplayer(body: &str, base_url: &reqwest::Url) -> Option<VideoSource> {
         {
             continue;
         }
+        let lower = candidate.to_ascii_lowercase();
+        if lower.contains("vast") || lower.contains("/ads") || lower.contains("ads.") {
+            continue;
+        }
         if let Ok(url) = resolve_provider_url(base_url, candidate) {
             return Some(VideoSource {
                 url: url.to_string(),
             });
+        }
+    }
+    // Fallback (páginas tipo umv): <source src='...m3u8'> o src="...mp4".
+    for needle in ["src='", "src=\""] {
+        let quote = needle.chars().last().unwrap();
+        let mut search_from = 0;
+        while let Some(offset) = body[search_from..].find(needle) {
+            let value_start = search_from + offset + needle.len();
+            let rest = &body[value_start..];
+            if let Some(end) = rest.find(quote) {
+                let candidate = &rest[..end];
+                if candidate.contains(".m3u8") || candidate.contains(".mp4") {
+                    if let Ok(url) = resolve_provider_url(base_url, candidate) {
+                        return Some(VideoSource {
+                            url: url.to_string(),
+                        });
+                    }
+                }
+            }
+            search_from = value_start;
         }
     }
     None
@@ -434,25 +485,39 @@ fn parse_mediafire(
         .iter()
         .find(|s| s.get("server").and_then(|v| v.as_str()) == Some("Mediafire"))
     {
+        // Best-effort: hoy el sitio ya no ofrece Mediafire como
+        // reproductor y la URL remota da 404. Nunca propagar error.
         if let Some(remote) = server.get("remote").and_then(|v| v.as_str()) {
             if let Ok(decoded) = STANDARD.decode(remote) {
-                let decoded_url = String::from_utf8(decoded)?;
-                let remote_url = resolve_provider_url(base_url, &decoded_url)?;
-                let response = client.get(remote_url).send()?.error_for_status()?;
-                let page_url = response.url().clone();
-                let page = response.text()?;
-                let download_document = scraper::Html::parse_document(&page);
-                let download_selector = scraper::Selector::parse("a[href]")
-                    .map_err(|error| anyhow!("Selector inválido: {error:?}"))?;
-                let download = download_document
-                    .select(&download_selector)
-                    .filter_map(|link| link.value().attr("href"))
-                    .find(|href| href.contains("download"));
-                if let Some(download) = download {
-                    let download_url = resolve_provider_url(&page_url, download)?;
-                    return Ok(Some(VideoSource {
-                        url: download_url.to_string(),
-                    }));
+                if let Ok(decoded_url) = String::from_utf8(decoded) {
+                    let decoded_url = decoded_url.trim();
+                    if let Ok(remote_url) = resolve_provider_url(base_url, decoded_url) {
+                        if let Ok(response) = client.get(remote_url).send() {
+                            if let Ok(response) = response.error_for_status() {
+                                let page_url = response.url().clone();
+                                if let Ok(page) = response.text() {
+                                    let download_document = scraper::Html::parse_document(&page);
+                                    if let Ok(download_selector) =
+                                        scraper::Selector::parse("a[href]")
+                                    {
+                                        let download = download_document
+                                            .select(&download_selector)
+                                            .filter_map(|link| link.value().attr("href"))
+                                            .find(|href| href.contains("download"));
+                                        if let Some(download) = download {
+                                            if let Ok(download_url) =
+                                                resolve_provider_url(&page_url, download)
+                                            {
+                                                return Ok(Some(VideoSource {
+                                                    url: download_url.to_string(),
+                                                }));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -500,10 +565,10 @@ mod tests {
 
     #[test]
     fn episode_endpoint_parser_handles_relative_and_double_quoted_urls() {
-        let scripts = vec![r#"fetch({url: "/ajax/search_episode/bleach"})"#.to_string()];
+        let scripts = vec![r#"fetch({url: "/ajax/episodes/bleach"})"#.to_string()];
         assert_eq!(
             find_episode_endpoint(&scripts).as_deref(),
-            Some("/ajax/search_episode/bleach")
+            Some("/ajax/episodes/bleach")
         );
     }
 
@@ -535,18 +600,19 @@ mod tests {
 
     #[test]
     fn test_search_parses_h5_a() {
+        // El sitio real usa hrefs absolutos sin prefijo /anime/.
         let html = r#"
             <html>
-                <h5><a href="/anime/bleach/">Bleach</a></h5>
-                <h5><a href="/anime/naruto/">Naruto</a></h5>
+                <h5><a href="https://jkanime.net/bleach/">Bleach</a></h5>
+                <h5><a href="https://jkanime.net/naruto/">Naruto</a></h5>
             </html>
         "#;
         let results = parse_search(html).unwrap();
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].title, "Bleach");
-        assert_eq!(results[0].slug, "/anime/bleach/");
+        assert_eq!(results[0].slug, "https://jkanime.net/bleach/");
         assert_eq!(results[1].title, "Naruto");
-        assert_eq!(results[1].slug, "/anime/naruto/");
+        assert_eq!(results[1].slug, "https://jkanime.net/naruto/");
     }
 
     #[test]

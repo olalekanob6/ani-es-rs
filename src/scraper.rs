@@ -17,7 +17,7 @@ pub fn search_anime_cached(
     query: &str,
     cache: &mut crate::ScraperCache,
 ) -> Result<Vec<AnimeSearchResult>> {
-    let key = format!("search:{query}");
+    let key = format!("search:{}", query.trim().to_lowercase());
     if let Some(value) = cache.get(&key) {
         if let Ok(results) = serde_json::from_str(value) {
             return Ok(results);
@@ -46,8 +46,12 @@ pub fn fetch_anime_detail(
     }
 
     let detail = JkanimeProvider::new().detail(client, slug)?;
-    if let Ok(value) = serde_json::to_string(&detail) {
-        cache.set(key, value, 900);
+    // total_episodes == 1 puede ser el fallback cuando el POST ajax
+    // falló: no cachearlo para no bloquear episodios >1 durante 900s.
+    if detail.total_episodes > 1 {
+        if let Ok(value) = serde_json::to_string(&detail) {
+            cache.set(key, value, 900);
+        }
     }
     Ok(detail)
 }
@@ -58,5 +62,7 @@ pub fn fetch_video_source(
     episode_number: u32,
     _cache: &mut crate::ScraperCache,
 ) -> Result<VideoSource> {
+    // Intencionadamente sin caché: la URL firmada del video
+    // expira ~1-2h después de generarse.
     JkanimeProvider::new().video_source(client, anime_url, episode_number)
 }

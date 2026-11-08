@@ -80,7 +80,7 @@ install_macos() {
         exit 1
     fi
     
-    brew install mpv fzf
+    brew install mpv fzf || true
     echo ""
     echo "Dependencias instaladas correctamente."
 }

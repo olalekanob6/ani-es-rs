@@ -14,7 +14,7 @@ pub struct Config {
 pub struct AppConfig {
     #[serde(default = "default_log_level")]
     pub log_level: String,
-    #[serde(default)]
+    #[serde(default = "default_color")]
     pub color: bool,
     #[serde(default = "default_timeout")]
     pub timeout_seconds: u64,
@@ -32,6 +32,10 @@ impl Default for AppConfig {
 
 fn default_log_level() -> String {
     "info".to_string()
+}
+
+fn default_color() -> bool {
+    true
 }
 
 fn default_timeout() -> u64 {
