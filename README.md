@@ -41,7 +41,7 @@ cd ani-es-rs
 .\install.ps1
 ```
 
-El script instalará Rust (si no está presente), mpv y fzf usando `winget` o descarga manual.
+El script instala Rust y fzf cuando `winget` está disponible. mpv puede requerir instalación manual.
 
 **Nota:** En Windows, asegúrate de que `mpv` y `fzf` estén en el `PATH` del sistema.
 
@@ -58,10 +58,10 @@ chmod +x install.sh
 ./install.sh
 ```
 
-Después podrás usar:
+Linux y macOS requieren Rust instalado antes de ejecutar el instalador. El binario compilado queda en `target/release/ani-es-rs`:
 
 ```bash
-ani-es-rs
+./target/release/ani-es-rs
 ```
 
 </details>
@@ -119,13 +119,11 @@ Gestores soportados:
 
 ## 🔧 Dependencias
 
-* `rustc` / `cargo` (1.70+)
+* Rust estable (`rustc` y `cargo`) para compilar desde el código fuente
 * `mpv`
-* `fzf`
-* `curl`
-* `jq`
+* `fzf` (solo para los menús interactivos; `--no-fzf` evita esa dependencia)
 
-El instalador se encarga de todo automáticamente.
+El instalador comprueba e instala `mpv` y `fzf` en Linux/macOS. La compilación requiere Rust.
 
 ---
 
@@ -143,7 +141,7 @@ Para que puedas continuar fácilmente después.
 ## ❌ Desinstalar
 
 ```bash
-./uninstall.sh
+rm -f /usr/local/bin/ani-es-rs
 ```
 
 ---

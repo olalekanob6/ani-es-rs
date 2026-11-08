@@ -29,7 +29,7 @@ pub fn select_from_list(items: &[String], prompt: &str, height: &str) -> Result<
 
     let mut cmd = Command::new("fzf");
     cmd.arg("--prompt")
-        .arg(prompt)
+        .arg(strip_ansi_codes(prompt))
         .arg("--height")
         .arg(height)
         .arg("--border")
@@ -37,7 +37,11 @@ pub fn select_from_list(items: &[String], prompt: &str, height: &str) -> Result<
         .arg("--margin=1,1,0,0")
         .arg("--reverse");
 
-    let input = items.join("\n");
+    let input = items
+        .iter()
+        .map(|item| strip_ansi_codes(item))
+        .collect::<Vec<_>>()
+        .join("\n");
     let mut child = cmd
         .arg("--tac")
         .stdin(std::process::Stdio::piped())
@@ -71,7 +75,7 @@ pub fn select_episode(total: u32, prompt: &str) -> Result<Option<u32>> {
     let items: Vec<String> = (1..=total).map(|n| n.to_string()).collect();
     let mut cmd = Command::new("fzf");
     cmd.arg("--prompt")
-        .arg(prompt)
+        .arg(strip_ansi_codes(prompt))
         .arg("--height")
         .arg("~30")
         .arg("--border")
@@ -112,7 +116,7 @@ pub fn select_episode(total: u32, prompt: &str) -> Result<Option<u32>> {
 pub fn select_post_episode_action() -> Result<Option<String>> {
     ensure_fzf()?;
 
-    let options = vec![
+    let options = [
         "Siguiente".to_string(),
         "Retroceder".to_string(),
         "Atras".to_string(),
@@ -153,5 +157,34 @@ pub fn select_post_episode_action() -> Result<Option<String>> {
         Ok(None)
     } else {
         Ok(Some(selected))
+    }
+}
+
+fn strip_ansi_codes(value: &str) -> String {
+    let mut result = String::with_capacity(value.len());
+    let mut chars = value.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' && chars.peek() == Some(&'[') {
+            chars.next();
+            for code in chars.by_ref() {
+                if ('@'..='~').contains(&code) {
+                    break;
+                }
+            }
+        } else {
+            result.push(ch);
+        }
+    }
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strips_ansi_sequences_from_fzf_values() {
+        assert_eq!(strip_ansi_codes("\x1b[36mBleach\x1b[0m"), "Bleach");
+        assert_eq!(strip_ansi_codes("plain"), "plain");
     }
 }

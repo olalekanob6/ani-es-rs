@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -48,7 +47,7 @@ impl ScraperCache {
         let value = value.into();
         let expires_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs() + ttl_secs)
+            .map(|d| d.as_secs().saturating_add(ttl_secs))
             .unwrap_or(0);
 
         self.data
@@ -71,15 +70,9 @@ impl ScraperCache {
 
     fn persist(&self) {
         if let Ok(data) = serde_json::to_string(&self.data) {
-            if let Some(parent) = self.path.parent() {
-                let _ = fs::create_dir_all(parent);
+            if let Err(error) = crate::storage::atomic_write(&self.path, data.as_bytes()) {
+                crate::logger::warn(&format!("No se pudo guardar la caché: {error}"));
             }
-            let _ = OpenOptions::new()
-                .create(true)
-                .truncate(true)
-                .write(true)
-                .open(&self.path)
-                .and_then(|mut f| f.write_all(data.as_bytes()));
         }
     }
 }
@@ -91,18 +84,25 @@ impl Default for ScraperCache {
 }
 
 fn cache_dir() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("ani-es-rs")
+    crate::storage::app_data_dir()
+        .unwrap_or_else(|_| PathBuf::from(".").join("ani-es-rs"))
         .join("cache")
         .join("scraper.json")
 }
 
 fn load(path: &PathBuf) -> HashMap<String, CacheEntry> {
-    if let Ok(data) = fs::read_to_string(path) {
-        if let Ok(map) = serde_json::from_str(&data) {
-            return map;
+    match fs::read_to_string(path) {
+        Ok(data) => match serde_json::from_str(&data) {
+            Ok(map) => map,
+            Err(error) => {
+                crate::logger::warn(&format!("La caché está dañada y se ignorará: {error}"));
+                HashMap::new()
+            }
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => HashMap::new(),
+        Err(error) => {
+            crate::logger::warn(&format!("No se pudo leer la caché: {error}"));
+            HashMap::new()
         }
     }
-    HashMap::new()
 }

@@ -18,6 +18,11 @@ fi
 echo "Sistema detectado: $OS"
 echo ""
 
+if [[ "$OS" != "windows" ]] && ! command -v cargo &> /dev/null; then
+    echo "Cargo no encontrado. Instala Rust desde https://rustup.rs/ y vuelve a ejecutar este instalador."
+    exit 1
+fi
+
 # Función para instalar en Linux
 install_linux() {
     echo "Instalando dependencias en Linux..."
@@ -35,7 +40,7 @@ install_linux() {
         PKG_MANAGER="pacman"
     else
         echo "Gestor de paquetes no soportado."
-        echo "Instala manualmente: mpv, fzf, curl, jq"
+        echo "Instala manualmente: mpv y fzf"
         exit 1
     fi
     
@@ -46,19 +51,19 @@ install_linux() {
     case $PKG_MANAGER in
         apt)
             echo "Se requiere contraseña de sudo para instalar dependencias... (escribe tu contraseña y presiona Enter)" && sudo apt-get update -y
-            sudo apt-get install -y mpv fzf curl jq
+            sudo apt-get install -y mpv fzf
             ;;
         dnf)
-            echo "Se requiere contraseña de sudo para instalar dependencias... (escribe tu contraseña y presiona Enter)" && sudo dnf install -y mpv fzf curl jq
+            echo "Se requiere contraseña de sudo para instalar dependencias... (escribe tu contraseña y presiona Enter)" && sudo dnf install -y mpv fzf
             ;;
         yum)
-            echo "Se requiere contraseña de sudo para instalar dependencias... (escribe tu contraseña y presiona Enter)" && sudo yum install -y mpv fzf curl jq
+            echo "Se requiere contraseña de sudo para instalar dependencias... (escribe tu contraseña y presiona Enter)" && sudo yum install -y mpv fzf
             ;;
         zypper)
-            echo "Se requiere contraseña de sudo para instalar dependencias... (escribe tu contraseña y presiona Enter)" && sudo zypper install -y mpv fzf curl jq
+            echo "Se requiere contraseña de sudo para instalar dependencias... (escribe tu contraseña y presiona Enter)" && sudo zypper install -y mpv fzf
             ;;
         pacman)
-            echo "Se requiere contraseña de sudo para instalar dependencias... (escribe tu contraseña y presiona Enter)" && sudo pacman -S --noconfirm mpv fzf curl jq
+            echo "Se requiere contraseña de sudo para instalar dependencias... (escribe tu contraseña y presiona Enter)" && sudo pacman -S --noconfirm mpv fzf
             ;;
     esac
     
@@ -75,7 +80,7 @@ install_macos() {
         exit 1
     fi
     
-    brew install mpv fzf curl jq
+    brew install mpv fzf
     echo ""
     echo "Dependencias instaladas correctamente."
 }
@@ -92,9 +97,6 @@ install_windows() {
     echo "2. fzf: https://github.com/junegunn/fzf"
     echo "   - Descarga el binario y añade la ruta al PATH"
     echo "   - O usa: winget install junegunn.fzf"
-    echo ""
-    echo "3. curl y jq: suelen estar incluidos en Windows 10+"
-    echo "   - Si no, instálalos desde: https://curl.se/windows/ y https://stedolan.github.io/jq/"
     echo ""
     echo "Después de instalar las dependencias, ejecuta:"
     echo "  cargo build --release"
@@ -114,7 +116,7 @@ case $OS in
         ;;
     *)
         echo "Sistema operativo no detectado: $OSTYPE"
-        echo "Instala manualmente: mpv, fzf, curl, jq"
+        echo "Instala manualmente: mpv y fzf"
         exit 1
         ;;
 esac

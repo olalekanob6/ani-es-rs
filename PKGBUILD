@@ -1,6 +1,6 @@
-# Maintainer: tu-usuario <tu-email@example.com>
+# Maintainer: olal3
 pkgname=ani-es-rs
-pkgver=0.1.0
+pkgver=0.1.2
 pkgrel=1
 pkgdesc="Cliente de anime en terminal para jkanime.net"
 arch=('x86_64')

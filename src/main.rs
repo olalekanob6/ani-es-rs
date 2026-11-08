@@ -1,13 +1,14 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use reqwest::blocking::Client;
 
 use ani_es_rs::{
-    add_watchlist, build_client, color, info, init as init_logger, load_history, load_watchlist,
-    mark_status, migrate_legacy_db_if_exists, models::AnimeSearchResult, play_video, prompt_search,
-    providers::AnimeProvider, providers::JkanimeProvider, remove_watchlist, save_history,
-    select_episode, select_from_list, select_post_episode_action, Config, HistoryMap, ScraperCache,
-    BOLD, CYAN, GREEN, RED, RESET, YELLOW, WatchlistStatus,
+    add_watchlist, color, fetch_anime_detail, info, init as init_logger, latest_anime,
+    load_history, load_watchlist, mark_status, migrate_legacy_db_if_exists,
+    models::AnimeSearchResult, play_video, prompt_search, providers::AnimeProvider,
+    providers::JkanimeProvider, remove_watchlist, save_history, scraper::search_anime_cached,
+    select_episode, select_from_list, select_post_episode_action, set_color_enabled, Config,
+    HistoryMap, ScraperCache, WatchlistStatus, BOLD, CYAN, GREEN, RED, RESET, YELLOW,
 };
 
 #[derive(Parser, Debug)]
@@ -48,31 +49,22 @@ enum Commands {
 #[derive(Subcommand, Debug)]
 enum WatchlistAction {
     /// Añade un anime a la watchlist
-    Add {
-        title: String,
-    },
+    Add { title: String },
     /// Elimina un anime de la watchlist
-    Remove {
-        title: String,
-    },
+    Remove { title: String },
     /// Muestra la watchlist
     List,
     /// Marca como "viendo"
-    MarkWatching {
-        title: String,
-    },
+    MarkWatching { title: String },
     /// Marca como "completado"
-    MarkCompleted {
-        title: String,
-    },
+    MarkCompleted { title: String },
     /// Marca como "planeado"
-    MarkPlanned {
-        title: String,
-    },
+    MarkPlanned { title: String },
 }
 
 fn main() -> Result<()> {
-    let config = Config::load();
+    let config = Config::load_checked()?;
+    set_color_enabled(config.app.color);
     init_logger(&config.app.log_level);
     info("Iniciando ani-es-rs");
 
@@ -81,20 +73,37 @@ fn main() -> Result<()> {
     let mut cache = ScraperCache::new();
 
     let args = Args::parse();
-    let client = build_client()?;
+    let client = JkanimeProvider::build_client_with_timeout(config.app.timeout_seconds)?;
     let provider = JkanimeProvider::new();
 
     if let Some(Commands::Watchlist { action }) = args.command {
         let mut watchlist = load_watchlist()?;
         match action {
             WatchlistAction::Add { title } => {
-                let slug = title.to_lowercase().replace(' ', "-");
-                add_watchlist(&mut watchlist, title.clone(), slug)?;
-                println!("{}", color(format!("'{}' añadido a watchlist.", title), GREEN));
+                let results = search_anime_cached(&client, &title, &mut cache)?;
+                let selected = results
+                    .iter()
+                    .find(|result| result.title.eq_ignore_ascii_case(title.trim()))
+                    .or_else(|| results.first())
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("No se encontraron resultados para '{title}'")
+                    })?;
+                add_watchlist(
+                    &mut watchlist,
+                    selected.title.clone(),
+                    selected.slug.clone(),
+                )?;
+                println!(
+                    "{}",
+                    color(format!("'{}' añadido a watchlist.", selected.title), GREEN)
+                );
             }
             WatchlistAction::Remove { title } => {
                 remove_watchlist(&mut watchlist, &title)?;
-                println!("{}", color(format!("'{}' eliminado de watchlist.", title), GREEN));
+                println!(
+                    "{}",
+                    color(format!("'{}' eliminado de watchlist.", title), GREEN)
+                );
             }
             WatchlistAction::List => {
                 if watchlist.is_empty() {
@@ -117,28 +126,37 @@ fn main() -> Result<()> {
             }
             WatchlistAction::MarkWatching { title } => {
                 mark_status(&mut watchlist, &title, WatchlistStatus::Watching)?;
-                println!("{}", color(format!("'{}' marcado como viendo.", title), GREEN));
+                println!(
+                    "{}",
+                    color(format!("'{}' marcado como viendo.", title), GREEN)
+                );
             }
             WatchlistAction::MarkCompleted { title } => {
                 mark_status(&mut watchlist, &title, WatchlistStatus::Completed)?;
-                println!("{}", color(format!("'{}' marcado como completado.", title), GREEN));
+                println!(
+                    "{}",
+                    color(format!("'{}' marcado como completado.", title), GREEN)
+                );
             }
             WatchlistAction::MarkPlanned { title } => {
                 mark_status(&mut watchlist, &title, WatchlistStatus::Planned)?;
-                println!("{}", color(format!("'{}' marcado como planeado.", title), GREEN));
+                println!(
+                    "{}",
+                    color(format!("'{}' marcado como planeado.", title), GREEN)
+                );
             }
         }
         return Ok(());
     }
 
     if args.r#continue {
-        let _ = run_continue(&client, &mut history, &mut cache, &provider);
+        run_continue(&client, &mut history, &mut cache, &provider, args.no_fzf)?;
         return Ok(());
     }
 
     if args.query.is_some() || args.episode.is_some() || args.no_fzf {
         let query = args.query.unwrap_or_default();
-        let _ = run_search_and_play(
+        run_search_and_play(
             &client,
             &mut history,
             &query,
@@ -147,7 +165,7 @@ fn main() -> Result<()> {
             args.auto_next,
             &mut cache,
             &provider,
-        );
+        )?;
         return Ok(());
     }
 
@@ -196,12 +214,16 @@ fn run_main_menu(
                 if query.is_empty() {
                     continue;
                 }
-                let _ = run_search_and_play(
+                if let Err(error) = run_search_and_play(
                     client, history, &query, None, false, false, cache, provider,
-                );
+                ) {
+                    eprintln!("{}", color(format!("Error: {error:#}"), RED));
+                }
             }
             "Continuar ultimo" => {
-                let _ = run_continue(client, history, cache, provider);
+                if let Err(error) = run_continue(client, history, cache, provider, false) {
+                    eprintln!("{}", color(format!("Error: {error:#}"), RED));
+                }
             }
             "Historial" => {
                 show_history(history);
@@ -228,7 +250,13 @@ fn show_history(history: &HistoryMap) {
     }
 
     let mut entries: Vec<_> = history.iter().collect();
-    entries.sort_by(|a, b| b.1.last_cap.cmp(&a.1.last_cap));
+    entries.sort_by(|a, b| {
+        b.1.updated_at
+            .as_deref()
+            .unwrap_or("")
+            .cmp(a.1.updated_at.as_deref().unwrap_or(""))
+            .then_with(|| b.1.last_cap.cmp(&a.1.last_cap))
+    });
 
     println!("\n{}", color("=== Historial ===", BOLD));
     for (title, entry) in entries {
@@ -250,11 +278,9 @@ fn run_continue(
     history: &mut HistoryMap,
     cache: &mut ScraperCache,
     provider: &JkanimeProvider,
-) {
-    let last = history
-        .iter()
-        .max_by_key(|(_, entry)| entry.last_cap)
-        .map(|(k, _)| k.clone());
+    no_fzf: bool,
+) -> Result<()> {
+    let last = latest_anime(history);
 
     if let Some(anime) = last {
         let last_cap = ani_es_rs::history::get_last_cap(history, &anime);
@@ -263,59 +289,59 @@ fn run_continue(
 
         if slug.is_none() {
             println!("{}", color("Buscando anime para continuar...", YELLOW));
-            if let Ok(results) = provider.search(client, &anime) {
-                if results.is_empty() {
-                    println!(
-                        "{}",
-                        color("No se encontraron resultados para continuar.", RED)
-                    );
-                    return;
+            let results = match search_anime_cached(client, &anime, cache) {
+                Ok(results) => results,
+                Err(error) => {
+                    return Err(error).context("No se pudo buscar el anime para continuar")
                 }
-                let selected = if results.len() == 1 {
-                    results.into_iter().next().unwrap()
-                } else {
-                    let options: Vec<String> = results
-                        .iter()
-                        .map(|r| format!("{} ({})", r.title, r.slug))
-                        .collect();
-                    let selected =
-                        select_from_list(&options, "Selecciona el anime para continuar:", "40%");
-                    if let Ok(Some(sel)) = selected {
-                        if let Some(inner) = sel.strip_suffix(')') {
-                            if let Some((title, slug)) = inner.rsplit_once(" (") {
-                                AnimeSearchResult {
-                                    title: title.to_string(),
-                                    slug: slug.to_string(),
-                                }
-                            } else {
-                                results.into_iter().next().unwrap()
+            };
+            if results.is_empty() {
+                println!(
+                    "{}",
+                    color("No se encontraron resultados para continuar.", RED)
+                );
+                return Ok(());
+            }
+            let selected = if results.len() == 1 {
+                results.into_iter().next().unwrap()
+            } else {
+                let options: Vec<String> = results
+                    .iter()
+                    .map(|r| format!("{} ({})", r.title, r.slug))
+                    .collect();
+                let selected =
+                    select_from_list(&options, "Selecciona el anime para continuar:", "40%");
+                if let Ok(Some(sel)) = selected {
+                    if let Some(inner) = sel.strip_suffix(')') {
+                        if let Some((title, slug)) = inner.rsplit_once(" (") {
+                            AnimeSearchResult {
+                                title: title.to_string(),
+                                slug: slug.to_string(),
                             }
                         } else {
                             results.into_iter().next().unwrap()
                         }
                     } else {
-                        return;
+                        results.into_iter().next().unwrap()
                     }
-                };
-                slug = Some(selected.slug);
-            } else {
-                println!(
-                    "{}",
-                    color("No se pudo buscar el anime para continuar.", RED)
-                );
-                return;
-            }
+                } else {
+                    return Ok(());
+                }
+            };
+            slug = Some(selected.slug);
         }
 
         let slug = slug.as_deref().unwrap_or(&anime);
-        let _ = play_anime(
-            client, history, &anime, slug, last_cap, &progress, false, cache, provider,
-        );
+        play_anime(
+            client, history, &anime, slug, last_cap, &progress, false, no_fzf, cache, provider,
+        )?;
     } else {
         println!("{}", color("No hay historial de animes recientes.", YELLOW));
     }
+    Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_search_and_play(
     client: &Client,
     history: &mut HistoryMap,
@@ -325,46 +351,44 @@ fn run_search_and_play(
     auto_next: bool,
     cache: &mut ScraperCache,
     provider: &JkanimeProvider,
-) {
-    let results = match provider.search(client, query) {
+) -> Result<()> {
+    let results = match search_anime_cached(client, query, cache) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("{}", color(format!("Error buscando: {}", e), RED));
-            return;
+            return Err(e).context("Error buscando anime");
         }
     };
     if results.is_empty() {
         println!("No se encontraron resultados para: {}", query);
-        return;
+        return Ok(());
     }
 
     let selected_title = if no_fzf {
         match results.first().map(|r| r.title.clone()) {
             Some(t) => t,
-            None => return,
+            None => return Ok(()),
         }
     } else {
         let items: Vec<String> = results.iter().map(|r| r.title.clone()).collect();
         match select_from_list(&items, &color("Selecciona una opción: ", CYAN), "~20") {
             Ok(Some(t)) => t,
-            Ok(None) => return,
+            Ok(None) => return Ok(()),
             Err(_) => {
                 eprintln!("{}", color("Error: fzf no esta instalado.", RED));
-                return;
+                return Ok(());
             }
         }
     };
 
     let selected = match results.iter().find(|r| r.title == selected_title) {
         Some(s) => s,
-        None => return,
+        None => return Ok(()),
     };
 
-    let detail = match provider.detail(client, &selected.slug) {
+    let detail = match fetch_anime_detail(client, &selected.slug, cache) {
         Ok(d) => d,
         Err(e) => {
-            eprintln!("{}", color(format!("Error obteniendo detalle: {}", e), RED));
-            return;
+            return Err(e).context("Error obteniendo detalle del anime");
         }
     };
     println!("Anime: {}", color(&detail.title, BOLD));
@@ -380,9 +404,9 @@ fn run_search_and_play(
         let ep = episode.unwrap_or(1);
         if ep == 0 || ep > detail.total_episodes {
             println!("{}", color("Episodio inválido", RED));
-            return;
+            return Ok(());
         }
-        let _ = play_anime(
+        play_anime(
             client,
             history,
             &detail.title,
@@ -394,11 +418,12 @@ fn run_search_and_play(
                 "00:00:00"
             },
             auto_next,
+            no_fzf,
             cache,
             provider,
-        );
+        )?;
     } else if last_cap > 0 && last_cap <= detail.total_episodes {
-        let _ = play_anime(
+        play_anime(
             client,
             history,
             &detail.title,
@@ -406,19 +431,20 @@ fn run_search_and_play(
             last_cap,
             &progress,
             auto_next,
+            no_fzf,
             cache,
             provider,
-        );
+        )?;
     } else {
         let cap = match select_episode(detail.total_episodes, &color("Episodio: ", CYAN)) {
             Ok(Some(c)) => c,
-            Ok(None) => return,
+            Ok(None) => return Ok(()),
             Err(_) => {
                 eprintln!("{}", color("Error: fzf no esta instalado.", RED));
-                return;
+                return Ok(());
             }
         };
-        let _ = play_anime(
+        play_anime(
             client,
             history,
             &detail.title,
@@ -426,12 +452,15 @@ fn run_search_and_play(
             cap,
             "00:00:00",
             auto_next,
+            no_fzf,
             cache,
             provider,
-        );
+        )?;
     }
+    Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn play_anime(
     client: &Client,
     history: &mut HistoryMap,
@@ -440,66 +469,56 @@ fn play_anime(
     episode: u32,
     progress: &str,
     auto_next: bool,
-    _cache: &mut ScraperCache,
+    no_fzf: bool,
+    cache: &mut ScraperCache,
     provider: &JkanimeProvider,
-) {
-    let detail = match provider.detail(client, slug) {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("{}", color(format!("Error obteniendo detalle: {}", e), RED));
-            return;
-        }
-    };
-    let source = match provider.video_source(client, &detail.slug, episode) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("{}", color(format!("Error obteniendo video: {}", e), RED));
-            return;
-        }
-    };
+) -> Result<()> {
+    let detail = fetch_anime_detail(client, slug, cache)?;
+    if episode == 0 || episode > detail.total_episodes {
+        anyhow::bail!(
+            "Episodio {episode} fuera de rango (1-{})",
+            detail.total_episodes
+        );
+    }
+    let source = provider.video_source(client, &detail.slug, episode)?;
     let episode_label = format!("{}-{}", title, episode);
 
-    let pos = match play_video(&source.url, progress, &episode_label) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("{}", color(format!("Error reproduciendo: {}", e), RED));
-            return;
-        }
-    };
+    let pos = play_video(&source.url, progress, &episode_label)?;
     ani_es_rs::history::update_history(history, title, episode, &pos, Some(detail.slug.clone()));
-    let _ = save_history(history);
+    save_history(history)?;
 
     if auto_next {
-        for next in (episode + 1)..=detail.total_episodes {
-            println!("Siguiente: {}-{}", title, next);
-            let source = match provider.video_source(client, &detail.slug, next) {
-                Ok(s) => s,
-                Err(e) => {
-                    eprintln!("{}", color(format!("Error obteniendo video: {}", e), RED));
-                    return;
-                }
-            };
-            let pos = match play_video(&source.url, "00:00:00", &format!("{}-{}", title, next)) {
-                Ok(p) => p,
-                Err(e) => {
-                    eprintln!("{}", color(format!("Error reproduciendo: {}", e), RED));
-                    return;
-                }
-            };
-            ani_es_rs::history::update_history(
-                history,
-                title,
-                next,
-                &pos,
-                Some(detail.slug.clone()),
-            );
-            let _ = save_history(history);
+        if episode < detail.total_episodes {
+            for next in (episode + 1)..=detail.total_episodes {
+                println!("Siguiente: {}-{}", title, next);
+                let source = match provider.video_source(client, &detail.slug, next) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        return Err(e).context("Error obteniendo el siguiente episodio");
+                    }
+                };
+                let pos = match play_video(&source.url, "00:00:00", &format!("{}-{}", title, next))
+                {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return Err(e).context("Error reproduciendo el siguiente episodio");
+                    }
+                };
+                ani_es_rs::history::update_history(
+                    history,
+                    title,
+                    next,
+                    &pos,
+                    Some(detail.slug.clone()),
+                );
+                save_history(history)?;
+            }
         }
-        return;
+        return Ok(());
     }
 
-    if no_fzf_flag_global() {
-        return;
+    if no_fzf {
+        return Ok(());
     }
 
     loop {
@@ -514,11 +533,10 @@ fn play_anime(
 
         match action.as_str() {
             "Siguiente" => {
-                let next = episode + 1;
-                if next > detail.total_episodes {
+                let Some(next) = next_episode(episode, detail.total_episodes) else {
                     println!("{}", color("No hay más episodios.", YELLOW));
                     break;
-                }
+                };
                 let source = match provider.video_source(client, &detail.slug, next) {
                     Ok(s) => s,
                     Err(e) => {
@@ -541,7 +559,7 @@ fn play_anime(
                     &pos,
                     Some(detail.slug.clone()),
                 );
-                let _ = save_history(history);
+                save_history(history)?;
             }
             "Retroceder" => {
                 if episode <= 1 {
@@ -571,7 +589,7 @@ fn play_anime(
                     &pos,
                     Some(detail.slug.clone()),
                 );
-                let _ = save_history(history);
+                save_history(history)?;
             }
             "Atras" => {
                 break;
@@ -579,6 +597,11 @@ fn play_anime(
             _ => break,
         }
     }
+    Ok(())
+}
+
+fn next_episode(current: u32, total: u32) -> Option<u32> {
+    current.checked_add(1).filter(|next| *next <= total)
 }
 
 fn show_watchlist_menu(
@@ -665,7 +688,7 @@ fn show_watchlist_menu(
                             println!("{}", color("Slug vacio para este anime.", RED));
                             continue;
                         }
-                        let _ = play_anime(
+                        play_anime(
                             client,
                             history,
                             selected_title,
@@ -673,21 +696,22 @@ fn show_watchlist_menu(
                             1,
                             "00:00:00",
                             true,
+                            false,
                             cache,
                             provider,
-                        );
+                        )?;
                     }
                     "Marcar como viendo" => {
-                        let _ = mark_status(&mut watchlist, selected_title, WatchlistStatus::Watching);
+                        mark_status(&mut watchlist, selected_title, WatchlistStatus::Watching)?;
                     }
                     "Marcar como completado" => {
-                        let _ = mark_status(&mut watchlist, selected_title, WatchlistStatus::Completed);
+                        mark_status(&mut watchlist, selected_title, WatchlistStatus::Completed)?;
                     }
                     "Marcar como planeado" => {
-                        let _ = mark_status(&mut watchlist, selected_title, WatchlistStatus::Planned);
+                        mark_status(&mut watchlist, selected_title, WatchlistStatus::Planned)?;
                     }
                     "Eliminar" => {
-                        let _ = remove_watchlist(&mut watchlist, selected_title);
+                        remove_watchlist(&mut watchlist, selected_title)?;
                     }
                     _ => break,
                 }
@@ -700,9 +724,12 @@ fn show_watchlist_menu(
                 if title.is_empty() {
                     continue;
                 }
-                let results = match provider.search(client, &title) {
+                let results = match search_anime_cached(client, &title, cache) {
                     Ok(r) => r,
-                    Err(_) => continue,
+                    Err(error) => {
+                        eprintln!("{}", color(format!("Error buscando anime: {error:#}"), RED));
+                        continue;
+                    }
                 };
                 if results.is_empty() {
                     println!("{}", color("No se encontraron resultados.", YELLOW));
@@ -750,10 +777,14 @@ fn show_watchlist_menu(
     Ok(())
 }
 
-fn no_fzf_flag_global() -> bool {
-    use std::env;
-    env::var("ANI_ES_NO_FZF")
-        .ok()
-        .map(|v| v == "1")
-        .unwrap_or(false)
+#[cfg(test)]
+mod tests {
+    use super::next_episode;
+
+    #[test]
+    fn next_episode_respects_limit_and_integer_boundary() {
+        assert_eq!(next_episode(2, 3), Some(3));
+        assert_eq!(next_episode(3, 3), None);
+        assert_eq!(next_episode(u32::MAX, u32::MAX), None);
+    }
 }

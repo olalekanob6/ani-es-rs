@@ -1,3 +1,5 @@
+use crate::storage::atomic_write;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -8,7 +10,7 @@ pub struct Config {
     pub app: AppConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     #[serde(default = "default_log_level")]
     pub log_level: String,
@@ -16,6 +18,16 @@ pub struct AppConfig {
     pub color: bool,
     #[serde(default = "default_timeout")]
     pub timeout_seconds: u64,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            log_level: default_log_level(),
+            color: true,
+            timeout_seconds: default_timeout(),
+        }
+    }
 }
 
 fn default_log_level() -> String {
@@ -32,26 +44,43 @@ impl Config {
     }
 
     pub fn load() -> Self {
+        Self::load_checked().unwrap_or_default()
+    }
+
+    pub fn load_checked() -> Result<Self> {
         let path = match Self::path() {
             Some(p) => p,
-            None => return Config::default(),
+            None => return Ok(Config::default()),
         };
 
         let data = match fs::read_to_string(&path) {
-            Ok(d) => d,
-            Err(_) => return Config::default(),
+            Ok(data) => data,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(Config::default())
+            }
+            Err(error) => {
+                return Err(error).with_context(|| format!("No se pudo leer {}", path.display()))
+            }
         };
 
-        match toml::from_str(&data) {
-            Ok(cfg) => cfg,
-            Err(_) => Config::default(),
-        }
+        toml::from_str(&data)
+            .with_context(|| format!("Configuración inválida en {}", path.display()))
     }
 
     pub fn save(&self) -> std::io::Result<()> {
-        let path = Self::path().expect("config dir not available");
-        fs::create_dir_all(path.parent().expect("config parent"))?;
-        let data = toml::to_string_pretty(self).expect("serialize config");
-        fs::write(path, data)
+        let path = Self::path().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "No se encontró directorio de configuración",
+            )
+        })?;
+        fs::create_dir_all(path.parent().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Ruta de configuración inválida",
+            )
+        })?)?;
+        let data = toml::to_string_pretty(self).map_err(std::io::Error::other)?;
+        atomic_write(&path, data.as_bytes())
     }
 }

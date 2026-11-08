@@ -3,8 +3,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::models::{HistoryEntry, HistoryMap};
+use crate::storage::{app_data_dir, atomic_write, legacy_data_dir};
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
 
@@ -44,12 +46,92 @@ mod tests {
             Some("https://jkanime.net/naruto/".to_string())
         );
     }
+
+    #[test]
+    fn latest_anime_uses_activity_timestamp_before_episode_number() {
+        let mut map = HistoryMap::default();
+        map.insert(
+            "Old series".to_string(),
+            HistoryEntry {
+                last_cap: 200,
+                updated_at: Some("2026-01-01 10:00:00".to_string()),
+                ..HistoryEntry::default()
+            },
+        );
+        map.insert(
+            "Recent series".to_string(),
+            HistoryEntry {
+                last_cap: 3,
+                updated_at: Some("2026-02-01 10:00:00".to_string()),
+                ..HistoryEntry::default()
+            },
+        );
+
+        assert_eq!(latest_anime(&map).as_deref(), Some("Recent series"));
+    }
+
+    #[test]
+    fn reads_legacy_history_json_when_new_path_does_not_exist() {
+        let dir = tempfile::tempdir().unwrap();
+        let current = dir.path().join("new/history.json");
+        let legacy = dir.path().join("old/history.json");
+        fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        fs::write(
+            &legacy,
+            r#"{"Bleach":{"last_cap":8,"progress":"00:12:00","slug":"/bleach/"}}"#,
+        )
+        .unwrap();
+
+        let history = load_history_from_paths(&current, &legacy).unwrap();
+        assert_eq!(get_last_cap(&history, "Bleach"), 8);
+        assert_eq!(get_progress(&history, "Bleach"), "00:12:00");
+    }
+
+    #[test]
+    fn missing_legacy_progress_uses_zero_position() {
+        let dir = tempfile::tempdir().unwrap();
+        let current = dir.path().join("new/history.json");
+        let legacy = dir.path().join("old/history.json");
+        fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        fs::write(&legacy, r#"{"Bleach":{"last_cap":8}}"#).unwrap();
+
+        let history = load_history_from_paths(&current, &legacy).unwrap();
+        assert_eq!(get_progress(&history, "Bleach"), "00:00:00");
+    }
+
+    #[test]
+    fn legacy_database_merge_preserves_json_entries_and_imports_missing_titles() {
+        let mut map = HistoryMap::default();
+        map.insert(
+            "Existing".to_string(),
+            HistoryEntry {
+                last_cap: 12,
+                progress: "00:05:00".to_string(),
+                ..HistoryEntry::default()
+            },
+        );
+
+        merge_legacy_history(
+            &mut map,
+            vec![
+                (
+                    "Existing".to_string(),
+                    Some(4),
+                    Some("00:01:00".to_string()),
+                ),
+                ("Imported".to_string(), Some(7), None),
+            ],
+        );
+
+        assert_eq!(get_last_cap(&map, "Existing"), 12);
+        assert_eq!(get_progress(&map, "Existing"), "00:05:00");
+        assert_eq!(get_last_cap(&map, "Imported"), 7);
+        assert_eq!(get_progress(&map, "Imported"), "00:00:00");
+    }
 }
 
 pub fn history_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("ani-es")
+    app_data_dir().unwrap_or_else(|_| PathBuf::from(".").join("ani-es-rs"))
 }
 
 pub fn history_json_path() -> PathBuf {
@@ -57,37 +139,64 @@ pub fn history_json_path() -> PathBuf {
 }
 
 pub fn history_db_path() -> PathBuf {
-    history_dir().join("history.db")
+    legacy_data_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("history.db")
 }
 
 pub fn load_history() -> Result<HistoryMap> {
     let path = history_json_path();
-    if !path.exists() {
+    let legacy = legacy_data_dir()
+        .map(|dir| dir.join("history.json"))
+        .unwrap_or_else(|| PathBuf::from("."));
+    load_history_from_paths(&path, &legacy)
+}
+
+fn load_history_from_paths(path: &Path, legacy_path: &Path) -> Result<HistoryMap> {
+    let Some(data) = read_preferred_file(path, legacy_path)? else {
         return Ok(HistoryMap::default());
+    };
+    Ok(serde_json::from_str(&data)?)
+}
+
+fn read_preferred_file(path: &Path, legacy_path: &Path) -> Result<Option<String>> {
+    match fs::read_to_string(path) {
+        Ok(data) => Ok(Some(data)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            match fs::read_to_string(legacy_path) {
+                Ok(data) => Ok(Some(data)),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(error) => Err(error.into()),
+            }
+        }
+        Err(error) => Err(error.into()),
     }
-    let data = fs::read_to_string(&path)?;
-    let map: HistoryMap = serde_json::from_str(&data)?;
-    Ok(map)
 }
 
 pub fn save_history(map: &HistoryMap) -> Result<()> {
-    let dir = history_dir();
-    fs::create_dir_all(&dir)?;
     let path = history_json_path();
-    let tmp = path.with_extension("json.tmp");
     let data = serde_json::to_string_pretty(map)?;
-    fs::write(&tmp, data)?;
-    fs::rename(&tmp, path)?;
-    Ok(())
+    atomic_write(&path, data.as_bytes()).map_err(Into::into)
 }
 
 pub fn migrate_legacy_db_if_exists() -> Result<()> {
     let db_path = history_db_path();
-    if !db_path.exists() {
+    if !path_exists(&db_path)? {
         return Ok(());
     }
 
-    println!("El sistema de guardado de historial ha cambiado.");
+    let declined_path = db_path.with_extension("migration-declined");
+    if !atty::is(atty::Stream::Stdin) {
+        if path_exists(&declined_path)? {
+            crate::logger::info("Se omite la migración SQLite que se rechazó previamente.");
+            return Ok(());
+        }
+        import_from_db(&db_path)?;
+        crate::logger::info("Historial SQLite importado de forma no destructiva.");
+        return Ok(());
+    }
+
+    println!("Se encontró una base de datos antigua de historial.");
     println!("¿Desea importar su antiguo historial? (y/n): ");
     use std::io::{self, Write};
     io::stdout().flush()?;
@@ -98,18 +207,28 @@ pub fn migrate_legacy_db_if_exists() -> Result<()> {
 
     if answer == "y" || answer == "s" {
         import_from_db(&db_path)?;
-        fs::remove_file(&db_path)?;
-        println!("Historial importado correctamente.");
+        if path_exists(&declined_path)? {
+            fs::remove_file(&declined_path)?;
+        }
+        println!("Historial importado correctamente; la base antigua se conserva como copia.");
     } else {
-        fs::remove_file(&db_path)?;
-        println!("El historial antiguo ha sido eliminado.");
+        atomic_write(&declined_path, b"declined\n")?;
+        println!("El historial antiguo se conserva sin cambios.");
     }
 
     Ok(())
 }
 
+fn path_exists(path: &Path) -> Result<bool> {
+    match fs::metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.into()),
+    }
+}
+
 fn import_from_db(db_path: &Path) -> Result<()> {
-    let mut map = load_history().unwrap_or_default();
+    let mut map = load_history()?;
     let conn = rusqlite::Connection::open(db_path)?;
 
     let table_exists: bool = conn.query_row(
@@ -131,30 +250,52 @@ fn import_from_db(db_path: &Path) -> Result<()> {
         ))
     })?;
 
-    for row in rows {
-        let (anime, last_cap_opt, progress_opt) = row?;
-        let last_cap = match last_cap_opt {
-            Some(v) => v.max(0) as u32,
-            None => 0,
-        };
-        let progress = progress_opt.unwrap_or_else(|| "00:00:00".to_string());
+    let rows = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+    if merge_legacy_history(&mut map, rows) {
+        save_history(&map)?;
+    }
+    Ok(())
+}
+
+fn merge_legacy_history(
+    map: &mut HistoryMap,
+    rows: impl IntoIterator<Item = (String, Option<i64>, Option<String>)>,
+) -> bool {
+    let mut changed = false;
+    for (anime, last_cap, progress) in rows {
+        if map.contains_key(&anime) {
+            continue;
+        }
         map.insert(
             anime,
             HistoryEntry {
-                last_cap,
-                progress,
+                last_cap: last_cap
+                    .map(|value| u32::try_from(value.max(0)).unwrap_or(u32::MAX))
+                    .unwrap_or(0),
+                progress: progress.unwrap_or_else(|| "00:00:00".to_string()),
                 slug: None,
                 updated_at: None,
             },
         );
+        changed = true;
     }
-
-    save_history(&map)?;
-    Ok(())
+    changed
 }
 
 pub fn get_last_cap(map: &HistoryMap, anime: &str) -> u32 {
     map.get(anime).map(|e| e.last_cap).unwrap_or(0)
+}
+
+pub fn latest_anime(map: &HistoryMap) -> Option<String> {
+    map.iter()
+        .max_by(|(_, a), (_, b)| {
+            a.updated_at
+                .as_deref()
+                .unwrap_or("")
+                .cmp(b.updated_at.as_deref().unwrap_or(""))
+                .then_with(|| a.last_cap.cmp(&b.last_cap))
+        })
+        .map(|(title, _)| title.clone())
 }
 
 pub fn get_progress(map: &HistoryMap, anime: &str) -> String {

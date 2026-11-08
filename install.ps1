@@ -79,18 +79,9 @@ if (-not (Test-Command cargo)) {
 # Instalar mpv
 if (-not (Test-Command mpv)) {
     Write-Host "Instalando mpv..."
-    if (Test-Command winget) {
-        winget install --id Gyan.FFmpeg --accept-source-agreements --accept-package-agreements
-        # winget no instala mpv directamente, descargar manualmente
-        Write-Host ""
-        Write-Host "Por favor, descarga mpv desde: https://mpv.io/installation/"
-        Write-Host "Y añade la ruta al PATH de Windows"
-        Write-Host ""
-    } else {
-        Write-Host "Por favor, descarga mpv desde: https://mpv.io/installation/"
-        Write-Host "Y añade la ruta al PATH de Windows"
-        Write-Host ""
-    }
+    Write-Host "Por favor, descarga mpv desde: https://mpv.io/installation/"
+    Write-Host "Y añade la ruta al PATH de Windows"
+    Write-Host ""
 } else {
     Write-Host "✓ mpv encontrado"
 }
@@ -107,19 +98,6 @@ if (-not (Test-Command fzf)) {
     }
 } else {
     Write-Host "✓ fzf encontrado"
-}
-
-# Verificar curl y jq
-if (Test-Command curl) {
-    Write-Host "✓ curl encontrado"
-} else {
-    Write-Host "⚠ curl no encontrado (puede estar incluido en Windows 10+)"
-}
-
-if (Test-Command jq) {
-    Write-Host "✓ jq encontrado"
-} else {
-    Write-Host "⚠ jq no encontrado. Descárgalo desde: https://stedolan.github.io/jq/"
 }
 
 Write-Host ""

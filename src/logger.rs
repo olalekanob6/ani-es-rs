@@ -12,6 +12,7 @@ pub enum Level {
 }
 
 impl Level {
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "debug" => Level::Debug,
@@ -43,12 +44,20 @@ impl LoggerState {
 
         let line = format!("{} {}\n", prefix, msg);
 
-        if let Ok(mut f) = OpenOptions::new()
+        match OpenOptions::new()
             .create(true)
             .append(true)
             .open(&self.file_path)
         {
-            let _ = f.write_all(line.as_bytes());
+            Ok(mut file) => {
+                if let Err(error) = file.write_all(line.as_bytes()) {
+                    eprintln!("No se pudo escribir el log: {error}");
+                }
+            }
+            Err(error) => eprintln!(
+                "No se pudo abrir el archivo de log {}: {error}",
+                self.file_path.display()
+            ),
         }
     }
 }
@@ -68,10 +77,14 @@ fn log_path() -> PathBuf {
 pub fn init(level: &str) {
     let path = log_path();
     if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
+        if let Err(error) = fs::create_dir_all(parent) {
+            eprintln!("No se pudo crear el directorio de logs: {error}");
+        }
     }
 
-    let mut state = STATE.lock().unwrap();
+    let mut state = STATE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     *state = Some(LoggerState {
         level: Level::from_str(level),
         file_path: path,
@@ -79,7 +92,9 @@ pub fn init(level: &str) {
 }
 
 pub fn log(level: Level, msg: &str) {
-    let state = STATE.lock().unwrap();
+    let state = STATE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let state = match state.as_ref() {
         Some(s) => s,
         None => return,
