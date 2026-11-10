@@ -1,4 +1,8 @@
-# Changelog
+## [Unreleased]
+
+### Added
+- El historial interactivo permite continuar un anime desde el episodio y la posición guardados, o borrarlo con confirmación.
+- El historial muestra el episodio y la posición guardados de cada anime.
 
 ## [0.1.2] - 2026-10-27
 

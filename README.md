@@ -22,6 +22,7 @@ CLI tool powered by **mpv + fzf**
 * 📺 Reproducción directa con **mpv**
 * ⏭️ Navegación entre episodios (siguiente / anterior)
 * 💾 Guarda automáticamente el último episodio visto
+* 📜 Desde el historial puedes continuar cualquier anime en su episodio y posición guardados o borrarlo con confirmación
 * ⚡ Interfaz interactiva con **fzf**
 * 🧠 Fallback automático para episodios en emisión
 * 📦 Compatible con Linux, macOS y Windows

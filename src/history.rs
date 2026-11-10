@@ -30,6 +30,26 @@ mod tests {
     }
 
     #[test]
+    fn delete_history_removes_only_the_requested_title() {
+        let mut map = HistoryMap::default();
+        map.insert("Bleach".to_string(), HistoryEntry::default());
+        map.insert("Naruto".to_string(), HistoryEntry::default());
+
+        assert!(delete_history(&mut map, "Bleach"));
+        assert!(!map.contains_key("Bleach"));
+        assert!(map.contains_key("Naruto"));
+    }
+
+    #[test]
+    fn delete_history_returns_false_for_unknown_title() {
+        let mut map = HistoryMap::default();
+        map.insert("Bleach".to_string(), HistoryEntry::default());
+
+        assert!(!delete_history(&mut map, "Unknown"));
+        assert!(map.contains_key("Bleach"));
+    }
+
+    #[test]
     fn test_update_history() {
         let mut map = HistoryMap::default();
         update_history(
@@ -302,6 +322,10 @@ pub fn get_progress(map: &HistoryMap, anime: &str) -> String {
     map.get(anime)
         .map(|e| e.progress.clone())
         .unwrap_or_else(|| "00:00:00".to_string())
+}
+
+pub fn delete_history(map: &mut HistoryMap, anime: &str) -> bool {
+    map.remove(anime).is_some()
 }
 
 pub fn update_history(

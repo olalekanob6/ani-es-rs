@@ -8,7 +8,7 @@ use ani_es_rs::{
     models::AnimeSearchResult, play_video, prompt_search, providers::AnimeProvider,
     providers::JkanimeProvider, remove_watchlist, save_history, scraper::search_anime_cached,
     select_episode, select_from_list, select_post_episode_action, set_color_enabled, Config,
-    HistoryMap, ScraperCache, WatchlistStatus, BOLD, CYAN, GREEN, RED, RESET, YELLOW,
+    HistoryMap, ScraperCache, WatchlistStatus, BOLD, CYAN, GREEN, RED, YELLOW,
 };
 
 #[derive(Parser, Debug)]
@@ -226,8 +226,7 @@ fn run_main_menu(
                 }
             }
             "Historial" => {
-                show_history(history);
-                let _ = prompt_search("Presiona enter para volver...");
+                show_history(client, history, cache, provider)?;
             }
             "Watchlist" => {
                 show_watchlist_menu(client, history, cache, provider)?;
@@ -243,34 +242,150 @@ fn run_main_menu(
     Ok(())
 }
 
-fn show_history(history: &HistoryMap) {
-    if history.is_empty() {
-        println!("{}", color("Sin historial", YELLOW));
-        return;
-    }
+fn history_row(title: &str, entry: &ani_es_rs::models::HistoryEntry) -> String {
+    let progress = if entry.progress.is_empty() {
+        "00:00:00"
+    } else {
+        &entry.progress
+    };
+    format!("{title} — episodio {} — {progress}", entry.last_cap.max(1))
+}
 
-    let mut entries: Vec<_> = history.iter().collect();
-    entries.sort_by(|a, b| {
-        b.1.updated_at
-            .as_deref()
-            .unwrap_or("")
-            .cmp(a.1.updated_at.as_deref().unwrap_or(""))
-            .then_with(|| b.1.last_cap.cmp(&a.1.last_cap))
-    });
+fn show_history(
+    client: &Client,
+    history: &mut HistoryMap,
+    cache: &mut ScraperCache,
+    provider: &JkanimeProvider,
+) -> Result<()> {
+    loop {
+        if history.is_empty() {
+            println!("{}", color("Sin historial", YELLOW));
+            return Ok(());
+        }
 
-    println!("\n{}", color("=== Historial ===", BOLD));
-    for (title, entry) in entries {
-        let ts = entry.updated_at.as_deref().unwrap_or("--");
-        println!(
-            "- {} {} cap {}{} ({})",
-            color(title, CYAN),
-            RESET,
-            color(entry.last_cap.to_string(), YELLOW),
-            RESET,
-            ts
-        );
+        let mut entries: Vec<_> = history.iter().collect();
+        entries.sort_by(|a, b| {
+            b.1.updated_at
+                .as_deref()
+                .unwrap_or("")
+                .cmp(a.1.updated_at.as_deref().unwrap_or(""))
+                .then_with(|| b.1.last_cap.cmp(&a.1.last_cap))
+        });
+        let titles: Vec<String> = entries.iter().map(|(title, _)| (*title).clone()).collect();
+        let rows: Vec<String> = entries
+            .iter()
+            .map(|(title, entry)| history_row(title, entry))
+            .collect();
+
+        let selected = match select_from_list(&rows, "Historial (esc para volver): ", "~20")? {
+            Some(selected) => selected,
+            None => return Ok(()),
+        };
+        let Some(index) = rows.iter().position(|row| row == &selected) else {
+            continue;
+        };
+        let title = titles[index].clone();
+
+        let action = match select_from_list(
+            &["Continuar".into(), "Borrar".into(), "Volver".into()],
+            &format!("{}: ", title),
+            "~6",
+        )? {
+            Some(action) => action,
+            None => continue,
+        };
+
+        match action.as_str() {
+            "Continuar" => {
+                let Some(entry) = history.get(&title).cloned() else {
+                    continue;
+                };
+                let slug = if let Some(slug) = entry.slug.as_ref() {
+                    slug.clone()
+                } else {
+                    let results = match search_anime_cached(client, &title, cache) {
+                        Ok(results) => results,
+                        Err(error) => {
+                            eprintln!(
+                                "No se pudo buscar el anime ({error:#}). Continúa manualmente en {}.",
+                                history_row(&title, &entry)
+                            );
+                            continue;
+                        }
+                    };
+                    if results.is_empty() {
+                        println!(
+                            "No se encontraron resultados; continúa manualmente en {}.",
+                            history_row(&title, &entry)
+                        );
+                        continue;
+                    }
+                    let result = if results.len() == 1 {
+                        results[0].clone()
+                    } else {
+                        let options: Vec<String> = results
+                            .iter()
+                            .map(|result| format!("{} ({})", result.title, result.slug))
+                            .collect();
+                        let Some(choice) =
+                            select_from_list(&options, "Selecciona el anime correcto: ", "40%")?
+                        else {
+                            continue;
+                        };
+                        let Some((_, slug)) = choice
+                            .strip_suffix(')')
+                            .and_then(|value| value.rsplit_once(" ("))
+                        else {
+                            continue;
+                        };
+                        AnimeSearchResult {
+                            title: title.clone(),
+                            slug: slug.to_string(),
+                        }
+                    };
+                    result.slug
+                };
+
+                if entry.last_cap == 0 {
+                    println!("No hay episodio guardado; comienza desde el episodio 1.");
+                }
+                if let Err(error) = play_anime(
+                    client,
+                    history,
+                    &title,
+                    &slug,
+                    entry.last_cap.max(1),
+                    &entry.progress,
+                    false,
+                    false,
+                    cache,
+                    provider,
+                ) {
+                    eprintln!(
+                        "No se pudo reanudar ({error:#}). Continúa manualmente en {}.",
+                        history_row(&title, &entry)
+                    );
+                }
+            }
+            "Borrar" => {
+                let confirmation = select_from_list(
+                    &["Confirmar borrado".into(), "Cancelar".into()],
+                    &format!("¿Borrar '{}' del historial? ", title),
+                    "~5",
+                )?;
+                if confirmation.as_deref() == Some("Confirmar borrado")
+                    && ani_es_rs::history::delete_history(history, &title)
+                {
+                    save_history(history)?;
+                    println!(
+                        "{}",
+                        color(format!("'{}' eliminado del historial.", title), GREEN)
+                    );
+                }
+            }
+            _ => continue,
+        }
     }
-    println!();
 }
 
 fn run_continue(
@@ -783,7 +898,22 @@ fn show_watchlist_menu(
 
 #[cfg(test)]
 mod tests {
-    use super::next_episode;
+    use super::{history_row, next_episode};
+    use ani_es_rs::models::HistoryEntry;
+
+    #[test]
+    fn history_row_shows_saved_episode_and_position() {
+        let entry = HistoryEntry {
+            last_cap: 2,
+            progress: "00:14:05".to_string(),
+            ..HistoryEntry::default()
+        };
+
+        assert_eq!(
+            history_row("Bleach", &entry),
+            "Bleach — episodio 2 — 00:14:05"
+        );
+    }
 
     #[test]
     fn next_episode_respects_limit_and_integer_boundary() {
