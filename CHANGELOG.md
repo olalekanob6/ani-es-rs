@@ -1,8 +1,24 @@
 ## [Unreleased]
 
+## [0.1.3] - 2026-11-11
+
 ### Added
+- Comando `ani-es-rs update` con comprobación, consentimiento explícito y validación SHA-256 de assets de GitHub Releases.
+- Workflow de publicación que compila assets para Linux, macOS y Windows y adjunta `SHA256SUMS`.
+- El actualizador evita reemplazar binarios administrados por pacman; Windows indica actualización manual.
 - El historial interactivo permite continuar un anime desde el episodio y la posición guardados, o borrarlo con confirmación.
 - El historial muestra el episodio y la posición guardados de cada anime.
+- Subcomando `history` para listar el historial sin fzf y vaciarlo con confirmación (`--clear`).
+- `watchlist list` muestra el último episodio visto y ordena por fecha de alta.
+- Helpers puros de watchlist con pruebas unitarias y `sorted_by_recent` en el historial.
+- Pruebas unitarias de parseo del CLI.
+- Marcas de tiempo en el archivo de log.
+
+### Changed
+- `select_episode` pide el número manualmente cuando la serie supera 5000 episodios.
+
+### Fixed
+- Se eliminó la doble lectura de argumentos en `main`.
 
 ## [0.1.2] - 2026-10-27
 

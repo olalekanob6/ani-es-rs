@@ -91,6 +91,39 @@ mod tests {
     }
 
     #[test]
+    fn sorted_by_recent_orders_by_timestamp_descending_then_episode_descending() {
+        let mut map = HistoryMap::default();
+        map.insert(
+            "Old".to_string(),
+            HistoryEntry {
+                last_cap: 200,
+                updated_at: Some("2026-01-01 10:00:00".to_string()),
+                ..HistoryEntry::default()
+            },
+        );
+        map.insert(
+            "Recent".to_string(),
+            HistoryEntry {
+                last_cap: 3,
+                updated_at: Some("2026-02-01 10:00:00".to_string()),
+                ..HistoryEntry::default()
+            },
+        );
+        map.insert(
+            "SameTime".to_string(),
+            HistoryEntry {
+                last_cap: 9,
+                updated_at: Some("2026-02-01 10:00:00".to_string()),
+                ..HistoryEntry::default()
+            },
+        );
+
+        let sorted = sorted_by_recent(&map);
+        let titles: Vec<&str> = sorted.iter().map(|(title, _)| title.as_str()).collect();
+        assert_eq!(titles, vec!["SameTime", "Recent", "Old"]);
+    }
+
+    #[test]
     fn reads_legacy_history_json_when_new_path_does_not_exist() {
         let dir = tempfile::tempdir().unwrap();
         let current = dir.path().join("new/history.json");
@@ -304,6 +337,21 @@ fn merge_legacy_history(
 
 pub fn get_last_cap(map: &HistoryMap, anime: &str) -> u32 {
     map.get(anime).map(|e| e.last_cap).unwrap_or(0)
+}
+
+pub fn sorted_by_recent(map: &HistoryMap) -> Vec<(String, HistoryEntry)> {
+    let mut entries: Vec<(String, HistoryEntry)> = map
+        .iter()
+        .map(|(title, entry)| (title.clone(), entry.clone()))
+        .collect();
+    entries.sort_by(|a, b| {
+        b.1.updated_at
+            .as_deref()
+            .unwrap_or("")
+            .cmp(a.1.updated_at.as_deref().unwrap_or(""))
+            .then_with(|| b.1.last_cap.cmp(&a.1.last_cap))
+    });
+    entries
 }
 
 pub fn latest_anime(map: &HistoryMap) -> Option<String> {

@@ -1,0 +1,55 @@
+name: Release assets
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            asset: ani-es-rs-linux-x86_64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            asset: ani-es-rs-macos-aarch64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            asset: ani-es-rs-windows-x86_64.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+      - shell: bash
+        run: cp target/${{ matrix.target }}/release/ani-es-rs${{ runner.os == 'Windows' && '.exe' || '' }} ${{ matrix.asset }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+          if-no-files-found: error
+
+  publish-assets:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create SHA256SUMS
+        working-directory: dist
+        run: sha256sum ani-es-rs-* > SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*

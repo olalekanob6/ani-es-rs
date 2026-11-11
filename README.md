@@ -22,12 +22,12 @@ CLI tool powered by **mpv + fzf**
 * 📺 Reproducción directa con **mpv**
 * ⏭️ Navegación entre episodios (siguiente / anterior)
 * 💾 Guarda automáticamente el último episodio visto
-* 📜 Desde el historial puedes continuar cualquier anime en su episodio y posición guardados o borrarlo con confirmación
+* 📜 Historial: continúa cualquier anime desde su episodio y posición, o bórralo; `ani-es-rs history` lo lista sin fzf y `ani-es-rs history --clear` lo vacía con confirmación
 * ⚡ Interfaz interactiva con **fzf**
 * 🧠 Fallback automático para episodios en emisión
 * 📦 Compatible con Linux, macOS y Windows
 * 🎯 Modo no interactivo: `--no-fzf`, `--episode`, `--auto-next`
-* 📋 Watchlist: agrega, elimina y marca animes como planeado / viendo / completado
+* 📋 Watchlist: `ani-es-rs watchlist list` muestra el estado y el último episodio visto, ordenado por fecha de alta
 * 🔄 Auto-next episode: continúa automáticamente con el siguiente episodio
 
 ---
@@ -93,6 +93,23 @@ O directamente:
 ```bash
 ani-es-rs naruto
 ```
+
+```bash
+ani-es-rs history
+ani-es-rs history --clear
+ani-es-rs watchlist list
+```
+
+### Actualizaciones
+
+`ani-es-rs update --check` consulta la release publicada más reciente sin instalar
+ni modificar datos locales. `ani-es-rs update` pide confirmación antes de instalar;
+`ani-es-rs update --yes` acepta explícitamente la instalación para automatizaciones.
+El binario descargado se verifica con `SHA256SUMS` antes de reemplazar el ejecutable.
+La actualización automática está disponible para Linux x86_64 y macOS arm64;
+Windows y otras arquitecturas requieren descarga y reemplazo manual desde GitHub Releases.
+Si pacman administra el ejecutable, actualízalo mediante pacman o tu helper AUR.
+La release debe incluir los assets de plataforma y `SHA256SUMS`.
 
 ---
 
@@ -173,6 +190,12 @@ Esto ayuda mucho a que más gente lo descubra 🙌
 ---
 
 ## 📝 Changelog
+
+### 0.1.3
+- Subcomando `history` para listar y vaciar el historial sin fzf.
+- `watchlist list` con el último episodio visto y orden por fecha de alta.
+- Comando `update` con verificación SHA-256 de assets y workflow de releases.
+- Limpiezas internas: fzf compartido, parseo centralizado y marcas de tiempo en el log.
 
 ### 0.1.2
 - Watchlist con subcomandos CLI y menú interactivo.

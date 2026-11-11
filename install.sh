@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 echo "Instalador de ani-es-rs"
 echo "========================"
@@ -18,8 +18,8 @@ fi
 echo "Sistema detectado: $OS"
 echo ""
 
-if [[ "$OS" != "windows" ]] && ! command -v cargo &> /dev/null; then
-    echo "Cargo no encontrado. Instala Rust desde https://rustup.rs/ y vuelve a ejecutar este instalador."
+if ! command -v cargo &> /dev/null; then
+    echo "Error: Cargo no encontrado. Instala Rust desde https://rustup.rs/ y vuelve a ejecutar este instalador." >&2
     exit 1
 fi
 
@@ -39,8 +39,8 @@ install_linux() {
     elif command -v pacman &> /dev/null; then
         PKG_MANAGER="pacman"
     else
-        echo "Gestor de paquetes no soportado."
-        echo "Instala manualmente: mpv y fzf"
+        echo "Error: gestor de paquetes no soportado." >&2
+        echo "Instala manualmente: mpv y fzf" >&2
         exit 1
     fi
     
@@ -50,20 +50,25 @@ install_linux() {
     # Actualizar paquetes
     case $PKG_MANAGER in
         apt)
-            echo "Se requiere contraseña de sudo para instalar dependencias... (escribe tu contraseña y presiona Enter)" && sudo apt-get update -y
+            echo "Se requiere autorización de sudo para instalar dependencias..."
+            sudo apt-get update -y
             sudo apt-get install -y mpv fzf
             ;;
         dnf)
-            echo "Se requiere contraseña de sudo para instalar dependencias... (escribe tu contraseña y presiona Enter)" && sudo dnf install -y mpv fzf
+            echo "Se requiere autorización de sudo para instalar dependencias..."
+            sudo dnf install -y mpv fzf
             ;;
         yum)
-            echo "Se requiere contraseña de sudo para instalar dependencias... (escribe tu contraseña y presiona Enter)" && sudo yum install -y mpv fzf
+            echo "Se requiere autorización de sudo para instalar dependencias..."
+            sudo yum install -y mpv fzf
             ;;
         zypper)
-            echo "Se requiere contraseña de sudo para instalar dependencias... (escribe tu contraseña y presiona Enter)" && sudo zypper install -y mpv fzf
+            echo "Se requiere autorización de sudo para instalar dependencias..."
+            sudo zypper install -y mpv fzf
             ;;
         pacman)
-            echo "Se requiere contraseña de sudo para instalar dependencias... (escribe tu contraseña y presiona Enter)" && sudo pacman -S --noconfirm mpv fzf
+            echo "Se requiere autorización de sudo para instalar dependencias..."
+            sudo pacman -S mpv fzf
             ;;
     esac
     
@@ -80,7 +85,7 @@ install_macos() {
         exit 1
     fi
     
-    brew install mpv fzf || true
+    brew install mpv fzf
     echo ""
     echo "Dependencias instaladas correctamente."
 }
@@ -124,17 +129,12 @@ esac
 # Compilar el proyecto
 echo ""
 echo "Compilando ani-es-rs..."
-if command -v cargo &> /dev/null; then
-    cargo build --release
-    echo ""
-    echo "¡Instalación completada!"
-    echo ""
-    echo "Ejecuta el binario con:"
-    echo "  ./target/release/ani-es-rs"
-    echo ""
-    echo "O instálalo en el PATH con:"
-    echo "  sudo cp target/release/ani-es-rs /usr/local/bin/"
-else
-    echo "Cargo no encontrado. Instala Rust desde: https://rustup.rs/"
-    exit 1
-fi
+cargo build --release --locked
+echo ""
+echo "¡Instalación completada!"
+echo ""
+echo "Ejecuta el binario con:"
+echo "  ./target/release/ani-es-rs"
+echo ""
+echo "O instálalo en el PATH con:"
+echo "  sudo cp target/release/ani-es-rs /usr/local/bin/"
