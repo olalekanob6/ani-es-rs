@@ -30,6 +30,14 @@ mod tests {
         assert_eq!(asset_name("linux", "mips"), None);
     }
     #[test]
+    fn checksum_manifest_rejects_duplicate_asset_lines() {
+        let digest = "a".repeat(64);
+        let manifest =
+            format!("{digest}  ani-es-rs-linux-x86_64\n{digest}  ani-es-rs-linux-x86_64\n");
+        assert!(checksum_for(&manifest, "ani-es-rs-linux-x86_64").is_err());
+    }
+
+    #[test]
     fn version_comparison_never_offers_a_downgrade() {
         assert_eq!(
             compare_versions("0.1.3", "0.1.2").unwrap(),
@@ -108,17 +116,32 @@ fn compare_versions(left: &str, right: &str) -> Result<std::cmp::Ordering> {
 }
 
 fn checksum_for(manifest: &str, asset: &str) -> Result<String> {
+    let mut checksum = None;
     for line in manifest.lines() {
         let mut fields = line.split_whitespace();
-        if fields
-            .next()
-            .is_some_and(|h| h.len() == 64 && h.bytes().all(|b| b.is_ascii_hexdigit()))
-            && fields.next() == Some(asset)
-        {
-            return Ok(line.split_whitespace().next().unwrap().to_ascii_lowercase());
+        let Some(hash) = fields.next() else {
+            continue;
+        };
+        let Some(name) = fields.next() else {
+            continue;
+        };
+        if name != asset {
+            continue;
         }
+        if fields.next().is_some()
+            || hash.len() != 64
+            || !hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            bail!("SHA256SUMS contiene una entrada inválida para {asset}");
+        }
+        if checksum.is_some() {
+            bail!("SHA256SUMS contiene entradas duplicadas para {asset}");
+        }
+        checksum = Some(hash.to_ascii_lowercase());
     }
-    bail!("SHA256SUMS no contiene un checksum válido para {asset}")
+    checksum.context(format!(
+        "SHA256SUMS no contiene un checksum válido para {asset}"
+    ))
 }
 
 #[derive(serde::Deserialize)]
