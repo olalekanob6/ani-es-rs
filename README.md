@@ -1,16 +1,10 @@
-# ani-es-rs
+# ani-es-rs — Watch anime from your terminal
 
-> Port en Rust de [ani-es](https://github.com/Zhuchii/ani-es) para ver anime en español desde la terminal.
+> A Rust CLI to search and watch Spanish-language anime from your terminal with mpv.
+>
+> Mira anime en español desde tu terminal con una CLI escrita en Rust.
 
-CLI tool powered by **mpv + fzf**
-
-⚡ Fast | 🎯 No ads | 🖥️ Lightweight | ❤️ Open Source
-
-⚡ Rápido | 🎯 Sin anuncios | 🖥️ Ligero | ❤️ Open Source
-
-> Inspired by [ani-es](https://github.com/Zhuchii/ani-es), focused on Spanish content. This is a Rust port of the original bash script.
-
----
+Inspired by [ani-es](https://github.com/Zhuchii/ani-es), focused on Spanish-language anime. ani-es-rs is a command-line interface for supported streaming sites; it does not host video content.
 
 **Search, stream and continue watching anime — all from your terminal.**
 
@@ -34,6 +28,14 @@ CLI tool powered by **mpv + fzf**
 
 ## ⚡ Instalación
 
+Descarga rápida del instalador para Linux/macOS (revísalo antes de ejecutarlo):
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/olalekanob6/ani-es-rs/master/install.sh
+less install.sh
+bash install.sh --interactive
+```
+
 <details><summary>Windows</summary>
 
 ```powershell
@@ -42,11 +44,9 @@ cd ani-es-rs
 .\install.ps1
 ```
 
-El script instala Rust y fzf cuando `winget` está disponible. mpv puede requerir instalación manual.
+El instalador descarga el binario publicado desde GitHub Releases y comprueba SHA-256 (no requiere Rust para el binario precompilado), no instala programas ni modifica el `PATH` automáticamente. Instala mpv para reproducir y fzf si quieres los menús interactivos. El binario queda en `%LOCALAPPDATA%\Programs\ani-es-rs`; puedes indicarle otra carpeta con `-InstallDir`.
 
-**Nota:** En Windows, asegúrate de que `mpv` y `fzf` estén en el `PATH` del sistema.
-
-**Probado en:** Windows 10/11 con PowerShell 5.1+ y `mpv`/`fzf` en `PATH`.
+El binario publicado para Windows es x86_64 y no requiere Cargo. El instalador por defecto no modifica `PATH`; usa `-Interactive` para elegir instalar, desinstalar o cancelar. mpv es necesario para reproducir y fzf es opcional.
 
 </details>
 
@@ -59,10 +59,10 @@ chmod +x install.sh
 ./install.sh
 ```
 
-Linux y macOS requieren Rust instalado antes de ejecutar el instalador. El binario compilado queda en `target/release/ani-es-rs`:
+El instalador descarga el binario de GitHub Releases, comprueba SHA-256 y lo coloca en `~/.local/bin/ani-es-rs`; no requiere Rust para el binario de Linux x86_64. Usa `--install-dir` para elegir otra ruta. No instala paquetes del sistema automáticamente. Si quieres que intente instalar las dependencias detectadas, usa `./install.sh --install-deps`; mpv es necesario para reproducir y fzf solo para menús interactivos. Si la carpeta de instalación no está en tu `PATH`, añádela según la configuración de tu shell.
 
 ```bash
-./target/release/ani-es-rs
+ani-es-rs
 ```
 
 </details>
@@ -76,7 +76,7 @@ chmod +x install.sh
 ./install.sh
 ```
 
-El script usará **Homebrew** para instalar las dependencias.
+La release ofrece actualmente un binario precompilado para macOS Apple Silicon (arm64); el instalador verifica su SHA-256 y no requiere Rust para esa arquitectura. Para Intel u otra arquitectura, clona el repo y compila con `bash install.sh --from-source` (requiere Rust/Cargo). No instala dependencias automáticamente.
 
 </details>
 
@@ -138,10 +138,10 @@ Gestores soportados:
 ## 🔧 Dependencias
 
 * Rust estable (`rustc` y `cargo`) para compilar desde el código fuente
-* `mpv`
-* `fzf` (solo para los menús interactivos; `--no-fzf` evita esa dependencia)
+* `mpv` para reproducir vídeo
+* `fzf` (opcional; solo para menús interactivos)
 
-El instalador comprueba e instala `mpv` y `fzf` en Linux/macOS. La compilación requiere Rust.
+Los instaladores detectan dependencias, pero no instalan paquetes del sistema automáticamente.
 
 ---
 
@@ -158,9 +158,13 @@ Para que puedas continuar fácilmente después.
 
 ## ❌ Desinstalar
 
+Los instaladores ofrecen una opción de desinstalación que elimina únicamente el ejecutable, no los datos ni el historial.
+
 ```bash
-rm -f /usr/local/bin/ani-es-rs
+rm -f "$HOME/.local/bin/ani-es-rs"
 ```
+
+En Windows, elimina `ani-es-rs.exe` de `%LOCALAPPDATA%\Programs\ani-es-rs` (o de la carpeta indicada con `-InstallDir`).
 
 ---
 
