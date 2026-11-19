@@ -4,6 +4,13 @@
 - Linux/macOS installers download the latest published binary, verify `SHA256SUMS`, and install without requiring Rust; Windows uses the PowerShell installer and verifies the release asset.
 - README installation instructions now surface the platform-specific install paths and supported prebuilt architectures.
 - Added repository, README, keyword, and category metadata to the Cargo manifest to improve package discovery.
+- README now documents command behavior, platform targets, configuration/data locations, and issue reporting; Arch package metadata is synchronized with v0.1.3 and checked in CI.
+
+### Added
+- GitHub issue templates and a maintainer checklist for release promotion.
+
+### Fixed
+- Search results with duplicate titles now resolve to the selected result by slug.
 
 ## [0.1.3] - 2026-11-11
 

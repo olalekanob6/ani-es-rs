@@ -24,6 +24,9 @@ jobs:
       - name: Check Unix installer (Linux/macOS)
         if: runner.os != 'Windows'
         run: bash -n install.sh tests/installers.sh && bash tests/installers.sh
+      - name: Check Arch package metadata (Linux)
+        if: runner.os == 'Linux'
+        run: bash tests/package-metadata.sh
       - name: Parse Windows installer (Windows PowerShell 5.1)
         if: runner.os == 'Windows'
         shell: powershell

@@ -323,6 +323,16 @@ fn parse_selected_title_slug(selection: &str) -> Option<(String, String)> {
     Some((title.to_string(), slug.to_string()))
 }
 
+fn resolve_selected_result<'a>(
+    results: &'a [AnimeSearchResult],
+    selection: &str,
+) -> Option<&'a AnimeSearchResult> {
+    let (title, slug) = parse_selected_title_slug(selection)?;
+    results
+        .iter()
+        .find(|result| result.title == title && result.slug == slug)
+}
+
 fn history_row(title: &str, entry: &ani_es_rs::models::HistoryEntry) -> String {
     let progress = if entry.progress.is_empty() {
         "00:00:00"
@@ -541,24 +551,26 @@ fn run_search_and_play(
         return Ok(());
     }
 
-    let selected_title = if no_fzf {
-        match results.first().map(|r| r.title.clone()) {
-            Some(t) => t,
-            None => return Ok(()),
-        }
+    let selected = if no_fzf {
+        results.first()
     } else {
-        let items: Vec<String> = results.iter().map(|r| r.title.clone()).collect();
-        match select_from_list(&items, &color("Selecciona una opción: ", CYAN), "~20") {
-            Ok(Some(t)) => t,
-            Ok(None) => return Ok(()),
-            Err(_) => {
-                eprintln!("{}", color("Error: fzf no esta instalado.", RED));
-                return Ok(());
-            }
-        }
+        let items: Vec<String> = results
+            .iter()
+            .map(|result| format!("{} ({})", result.title, result.slug))
+            .collect();
+        let selected_label =
+            match select_from_list(&items, &color("Selecciona una opción: ", CYAN), "~20") {
+                Ok(Some(selection)) => selection,
+                Ok(None) => return Ok(()),
+                Err(_) => {
+                    eprintln!("{}", color("Error: fzf no esta instalado.", RED));
+                    return Ok(());
+                }
+            };
+        resolve_selected_result(&results, &selected_label)
     };
 
-    let selected = match results.iter().find(|r| r.title == selected_title) {
+    let selected = match selected {
         Some(s) => s,
         None => return Ok(()),
     };
@@ -1060,6 +1072,26 @@ mod tests {
         assert_eq!(
             parse_selected_title_slug("Naruto (/naruto/)"),
             Some(("Naruto".to_string(), "/naruto/".to_string()))
+        );
+    }
+
+    #[test]
+    fn resolves_duplicate_search_titles_by_slug() {
+        let results = vec![
+            AnimeSearchResult {
+                title: "Naruto".to_string(),
+                slug: "/naruto/".to_string(),
+            },
+            AnimeSearchResult {
+                title: "Naruto".to_string(),
+                slug: "/naruto-shippuden/".to_string(),
+            },
+        ];
+
+        let selected = resolve_selected_result(&results, "Naruto (/naruto-shippuden/)");
+        assert_eq!(
+            selected.map(|result| result.slug.as_str()),
+            Some("/naruto-shippuden/")
         );
     }
 

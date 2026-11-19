@@ -1,12 +1,10 @@
-# ani-es-rs — Watch anime from your terminal
+# ani-es-rs — anime en español desde la terminal
 
-> A Rust CLI to search and watch Spanish-language anime from your terminal with mpv.
->
-> Mira anime en español desde tu terminal con una CLI escrita en Rust.
+CLI en Rust para buscar y ver anime en español desde la terminal con mpv. / A Rust CLI to search and watch Spanish-language anime from your terminal with mpv.
 
-Inspired by [ani-es](https://github.com/Zhuchii/ani-es), focused on Spanish-language anime. ani-es-rs is a command-line interface for supported streaming sites; it does not host video content.
+Inspirado en [ani-es](https://github.com/Zhuchii/ani-es). Es una interfaz para sitios compatibles; no aloja contenido de vídeo. / Inspired by [ani-es](https://github.com/Zhuchii/ani-es); it is a frontend for supported streaming sites and does not host video content.
 
-**Search, stream and continue watching anime — all from your terminal.**
+[![CI](https://github.com/olalekanob6/ani-es-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/olalekanob6/ani-es-rs/actions/workflows/ci.yml) [![Latest release](https://img.shields.io/github/v/release/olalekanob6/ani-es-rs)](https://github.com/olalekanob6/ani-es-rs/releases/latest)
 
 ---
 
@@ -36,7 +34,7 @@ less install.sh
 bash install.sh --interactive
 ```
 
-<details><summary>Windows</summary>
+### Windows (x86_64)
 
 ```powershell
 git clone https://github.com/olalekanob6/ani-es-rs.git
@@ -48,9 +46,7 @@ El instalador descarga el binario publicado desde GitHub Releases y comprueba SH
 
 El binario publicado para Windows es x86_64 y no requiere Cargo. El instalador por defecto no modifica `PATH`; usa `-Interactive` para elegir instalar, desinstalar o cancelar. mpv es necesario para reproducir y fzf es opcional.
 
-</details>
-
-<details><summary>Linux</summary>
+### Linux (x86_64)
 
 ```bash
 git clone https://github.com/olalekanob6/ani-es-rs.git
@@ -65,9 +61,7 @@ El instalador descarga el binario de GitHub Releases, comprueba SHA-256 y lo col
 ani-es-rs
 ```
 
-</details>
-
-<details><summary>macOS</summary>
+### macOS (Apple Silicon / arm64)
 
 ```bash
 git clone https://github.com/olalekanob6/ani-es-rs.git
@@ -78,7 +72,7 @@ chmod +x install.sh
 
 La release ofrece actualmente un binario precompilado para macOS Apple Silicon (arm64); el instalador verifica su SHA-256 y no requiere Rust para esa arquitectura. Para Intel u otra arquitectura, clona el repo y compila con `bash install.sh --from-source` (requiere Rust/Cargo). No instala dependencias automáticamente.
 
-</details>
+Targets precompilados adicionales y notas de seguridad están en [Releases](https://github.com/olalekanob6/ani-es-rs/releases) y la [guía detallada](README_INSTALL.md). Otras arquitecturas requieren compilar desde el código fuente.
 
 ---
 
@@ -98,7 +92,21 @@ ani-es-rs naruto
 ani-es-rs history
 ani-es-rs history --clear
 ani-es-rs watchlist list
+ani-es-rs update --check
 ```
+
+| Comando | Acción |
+| --- | --- |
+| `ani-es-rs <búsqueda>` | Busca anime y abre el selector interactivo. |
+| `ani-es-rs --continue` | Reanuda el último anime/episodio guardado. |
+| `ani-es-rs <búsqueda> --episode 3 --no-fzf` | Reproduce un episodio sin el selector fzf. |
+| `ani-es-rs <búsqueda> --auto-next` | Avanza automáticamente entre episodios. |
+| `ani-es-rs history` / `ani-es-rs history --clear` | Muestra o limpia el historial (limpiar pide confirmación). |
+| `ani-es-rs watchlist list` | Muestra la lista de seguimiento. |
+| `ani-es-rs update --check` | Comprueba si hay una actualización, sin instalarla. |
+| `ani-es-rs --help` | Muestra todas las opciones y subcomandos. |
+
+`--no-fzf` selecciona el primer resultado de búsqueda; si no se indica `--episode`, empieza por el episodio 1. No permite escoger entre resultados.
 
 ### Actualizaciones
 
@@ -117,37 +125,31 @@ La release debe incluir los assets de plataforma y `SHA256SUMS`.
 
 Funciona en:
 
-* Debian / Ubuntu
-* Fedora / RHEL / CentOS
-* Arch Linux
-* macOS
-* Windows
+| Sistema | Binario publicado |
+| --- | --- |
+| Linux | x86_64 (GNU) |
+| macOS | Apple Silicon / aarch64 |
+| Windows | x86_64 |
 
-Gestores soportados:
+Otras arquitecturas pueden compilarse desde el código fuente con Rust/Cargo. Las dependencias de reproducción son:
 
-* `apt-get`
-* `dnf`
-* `yum`
-* `zypper`
-* `pacman`
-* `brew` (macOS)
-* `winget` (Windows)
+* `mpv` para reproducir vídeo (requerido)
+* `fzf` para menús interactivos (opcional; `--no-fzf` evita esa dependencia)
+* Rust estable (`rustc` y `cargo`) solo para compilar desde el código fuente
 
 ---
 
-## 🔧 Dependencias
+## 🔧 Instalar dependencias
 
-* Rust estable (`rustc` y `cargo`) para compilar desde el código fuente
-* `mpv` para reproducir vídeo
-* `fzf` (opcional; solo para menús interactivos)
-
-Los instaladores detectan dependencias, pero no instalan paquetes del sistema automáticamente.
+Los instaladores de release no instalan paquetes del sistema automáticamente. Consulta [Instalación](README_INSTALL.md) para instalarlos manualmente.
 
 ---
 
 ## 💾 Historial
 
-El script guarda automáticamente:
+El historial y la watchlist se guardan en el directorio de datos del usuario, dentro de `ani-es-rs/`; los logs usan `ani-es-rs/logs/`. La ubicación concreta depende del sistema operativo. La configuración opcional está en el directorio de configuración del usuario, en `ani-es-rs/config.toml`; usa [`config.example.toml`](config.example.toml) como referencia.
+
+El historial guarda automáticamente:
 
 * Último anime visto
 * Último episodio
@@ -177,7 +179,7 @@ No aloja contenido propio.
 
 ## ❤️ Contribuir
 
-Las contribuciones son bienvenidas:
+Las contribuciones y reportes reproducibles son bienvenidos. [Abre un issue](https://github.com/olalekanob6/ani-es-rs/issues/new/choose) para reportar un error o sugerir una mejora; elimina datos personales y URLs privadas antes de adjuntar logs.
 
 * Reportar bugs
 * Sugerir features
