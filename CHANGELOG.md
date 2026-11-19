@@ -1,5 +1,10 @@
 ## [Unreleased]
 
+### Changed
+- Linux/macOS installers download the latest published binary, verify `SHA256SUMS`, and install without requiring Rust; Windows uses the PowerShell installer and verifies the release asset.
+- README installation instructions now surface the platform-specific install paths and supported prebuilt architectures.
+- Added repository, README, keyword, and category metadata to the Cargo manifest to improve package discovery.
+
 ## [0.1.3] - 2026-11-11
 
 ### Added

@@ -5,6 +5,10 @@ edition = "2021"
 description = "CLI para ver anime en español desde la terminal (Rust port de ani-es)"
 authors = ["olal3"]
 license = "MIT"
+repository = "https://github.com/olalekanob6/ani-es-rs"
+readme = "README.md"
+keywords = ["anime", "cli", "mpv", "spanish", "terminal"]
+categories = ["command-line-utilities", "multimedia"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
