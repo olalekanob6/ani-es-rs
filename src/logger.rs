@@ -35,14 +35,7 @@ impl LoggerState {
             return;
         }
 
-        let prefix = match level {
-            Level::Debug => "[DEBUG]",
-            Level::Info => "[INFO]",
-            Level::Warn => "[WARN]",
-            Level::Error => "[ERROR]",
-        };
-
-        let line = format!("{} {}\n", prefix, msg);
+        let line = format_log_line(level, msg);
 
         match OpenOptions::new()
             .create(true)
@@ -115,6 +108,53 @@ pub fn warn(msg: &str) {
     log(Level::Warn, msg);
 }
 
+fn format_log_line(level: Level, msg: &str) -> String {
+    let prefix = match level {
+        Level::Debug => "[DEBUG]",
+        Level::Info => "[INFO]",
+        Level::Warn => "[WARN]",
+        Level::Error => "[ERROR]",
+    };
+    format!(
+        "{} {} {}\n",
+        chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+        prefix,
+        msg
+    )
+}
+
 pub fn error(msg: &str) {
     log(Level::Error, msg);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn log_line_starts_with_timestamp_and_level() {
+        let line = format_log_line(Level::Info, "hello");
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        assert_eq!(parts.len(), 4, "{line}");
+        assert_eq!(parts[2], "[INFO]");
+        assert_eq!(parts[3], "hello");
+        assert_eq!(parts[0].len(), 10, "{line}");
+        assert!(
+            parts[0].chars().enumerate().all(|(i, c)| {
+                if i == 4 || i == 7 {
+                    c == '-'
+                } else {
+                    c.is_ascii_digit()
+                }
+            }),
+            "{line}"
+        );
+    }
+
+    #[test]
+    fn log_line_formats_each_level() {
+        assert!(format_log_line(Level::Debug, "d").contains("[DEBUG]"));
+        assert!(format_log_line(Level::Warn, "w").contains("[WARN]"));
+        assert!(format_log_line(Level::Error, "e").contains("[ERROR]"));
+    }
 }

@@ -9,6 +9,7 @@ pub mod providers;
 pub mod scraper;
 pub mod storage;
 pub mod ui;
+pub mod update;
 pub mod watchlist;
 
 pub use cache::ScraperCache;

@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use reqwest::blocking::Client;
+use std::io::Write;
 
 use ani_es_rs::{
     add_watchlist, color, fetch_anime_detail, info, init as init_logger, latest_anime,
@@ -8,7 +9,7 @@ use ani_es_rs::{
     models::AnimeSearchResult, play_video, prompt_search, providers::AnimeProvider,
     providers::JkanimeProvider, remove_watchlist, save_history, scraper::search_anime_cached,
     select_episode, select_from_list, select_post_episode_action, set_color_enabled, Config,
-    HistoryMap, ScraperCache, WatchlistStatus, BOLD, CYAN, GREEN, RED, RESET, YELLOW,
+    HistoryMap, ScraperCache, WatchlistStatus, BOLD, CYAN, GREEN, RED, YELLOW,
 };
 
 #[derive(Parser, Debug)]
@@ -44,6 +45,21 @@ enum Commands {
         #[command(subcommand)]
         action: WatchlistAction,
     },
+    /// Gestiona el historial de episodios vistos
+    History {
+        /// Borra todo el historial (pide confirmación)
+        #[arg(long)]
+        clear: bool,
+    },
+    /// Comprueba e instala actualizaciones desde GitHub Releases
+    Update {
+        /// Solo comprobar; no instala ni solicita confirmación
+        #[arg(long)]
+        check: bool,
+        /// Aceptar instalación explícitamente (automatización)
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -63,6 +79,10 @@ enum WatchlistAction {
 }
 
 fn main() -> Result<()> {
+    let args = Args::parse();
+    if let Some(Commands::Update { check, yes }) = args.command.as_ref() {
+        return ani_es_rs::update::run(*check, *yes);
+    }
     let config = Config::load_checked()?;
     set_color_enabled(config.app.color);
     init_logger(&config.app.log_level);
@@ -72,81 +92,89 @@ fn main() -> Result<()> {
     let mut history = load_history()?;
     let mut cache = ScraperCache::new();
 
-    let args = Args::parse();
     let client = JkanimeProvider::build_client_with_timeout(config.app.timeout_seconds)?;
     let provider = JkanimeProvider::new();
 
-    if let Some(Commands::Watchlist { action }) = args.command {
-        let mut watchlist = load_watchlist()?;
-        match action {
-            WatchlistAction::Add { title } => {
-                let results = search_anime_cached(&client, &title, &mut cache)?;
-                let selected = results
-                    .iter()
-                    .find(|result| result.title.eq_ignore_ascii_case(title.trim()))
-                    .or_else(|| results.first())
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("No se encontraron resultados para '{title}'")
-                    })?;
-                add_watchlist(
-                    &mut watchlist,
-                    selected.title.clone(),
-                    selected.slug.clone(),
-                )?;
-                println!(
-                    "{}",
-                    color(format!("'{}' añadido a watchlist.", selected.title), GREEN)
-                );
-            }
-            WatchlistAction::Remove { title } => {
-                remove_watchlist(&mut watchlist, &title)?;
-                println!(
-                    "{}",
-                    color(format!("'{}' eliminado de watchlist.", title), GREEN)
-                );
-            }
-            WatchlistAction::List => {
-                if watchlist.is_empty() {
-                    println!("{}", color("Watchlist vacia.", YELLOW));
-                } else {
-                    for (title, entry) in watchlist.iter() {
-                        let status = match entry.status {
-                            WatchlistStatus::Planned => "Planeado",
-                            WatchlistStatus::Watching => "Viendo",
-                            WatchlistStatus::Completed => "Completado",
-                        };
-                        println!(
-                            "- {} [{}] (añadido: {})",
-                            color(title, CYAN),
-                            color(status, GREEN),
-                            entry.added_at
-                        );
+    match args.command {
+        Some(Commands::Watchlist { action }) => {
+            let mut watchlist = load_watchlist()?;
+            match action {
+                WatchlistAction::Add { title } => {
+                    let results = search_anime_cached(&client, &title, &mut cache)?;
+                    let selected = results
+                        .iter()
+                        .find(|result| result.title.eq_ignore_ascii_case(title.trim()))
+                        .or_else(|| results.first())
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("No se encontraron resultados para '{title}'")
+                        })?;
+                    add_watchlist(
+                        &mut watchlist,
+                        selected.title.clone(),
+                        selected.slug.clone(),
+                    )?;
+                    println!(
+                        "{}",
+                        color(format!("'{}' añadido a watchlist.", selected.title), GREEN)
+                    );
+                }
+                WatchlistAction::Remove { title } => {
+                    remove_watchlist(&mut watchlist, &title)?;
+                    println!(
+                        "{}",
+                        color(format!("'{}' eliminado de watchlist.", title), GREEN)
+                    );
+                }
+                WatchlistAction::List => {
+                    if watchlist.is_empty() {
+                        println!("{}", color("Watchlist vacia.", YELLOW));
+                    } else {
+                        let mut entries: Vec<_> = watchlist.iter().collect();
+                        entries.sort_by(|a, b| a.1.added_at.cmp(&b.1.added_at));
+                        for (title, entry) in entries {
+                            let last_cap = ani_es_rs::history::get_last_cap(&history, title);
+                            println!(
+                                "{}",
+                                watchlist_row(
+                                    &color(title, CYAN),
+                                    &color(watchlist_status_label(entry.status.clone()), GREEN),
+                                    &entry.added_at,
+                                    last_cap
+                                )
+                            );
+                        }
                     }
                 }
+                WatchlistAction::MarkWatching { title } => {
+                    mark_status(&mut watchlist, &title, WatchlistStatus::Watching)?;
+                    println!(
+                        "{}",
+                        color(format!("'{}' marcado como viendo.", title), GREEN)
+                    );
+                }
+                WatchlistAction::MarkCompleted { title } => {
+                    mark_status(&mut watchlist, &title, WatchlistStatus::Completed)?;
+                    println!(
+                        "{}",
+                        color(format!("'{}' marcado como completado.", title), GREEN)
+                    );
+                }
+                WatchlistAction::MarkPlanned { title } => {
+                    mark_status(&mut watchlist, &title, WatchlistStatus::Planned)?;
+                    println!(
+                        "{}",
+                        color(format!("'{}' marcado como planeado.", title), GREEN)
+                    );
+                }
             }
-            WatchlistAction::MarkWatching { title } => {
-                mark_status(&mut watchlist, &title, WatchlistStatus::Watching)?;
-                println!(
-                    "{}",
-                    color(format!("'{}' marcado como viendo.", title), GREEN)
-                );
-            }
-            WatchlistAction::MarkCompleted { title } => {
-                mark_status(&mut watchlist, &title, WatchlistStatus::Completed)?;
-                println!(
-                    "{}",
-                    color(format!("'{}' marcado como completado.", title), GREEN)
-                );
-            }
-            WatchlistAction::MarkPlanned { title } => {
-                mark_status(&mut watchlist, &title, WatchlistStatus::Planned)?;
-                println!(
-                    "{}",
-                    color(format!("'{}' marcado como planeado.", title), GREEN)
-                );
-            }
+            return Ok(());
         }
-        return Ok(());
+        Some(Commands::History { clear }) => {
+            run_history_command(&mut history, clear)?;
+            return Ok(());
+        }
+        Some(Commands::Update { .. }) => {}
+        None => {}
     }
 
     if args.r#continue {
@@ -226,8 +254,7 @@ fn run_main_menu(
                 }
             }
             "Historial" => {
-                show_history(history);
-                let _ = prompt_search("Presiona enter para volver...");
+                show_history(client, history, cache, provider)?;
             }
             "Watchlist" => {
                 show_watchlist_menu(client, history, cache, provider)?;
@@ -243,34 +270,193 @@ fn run_main_menu(
     Ok(())
 }
 
-fn show_history(history: &HistoryMap) {
+fn run_history_command(history: &mut HistoryMap, clear: bool) -> Result<()> {
+    if clear {
+        print!("¿Borrar todo el historial? [s/N] ");
+        std::io::stdout().flush()?;
+        let mut answer = String::new();
+        std::io::stdin().read_line(&mut answer)?;
+        if matches!(
+            answer.trim().to_ascii_lowercase().as_str(),
+            "s" | "si" | "sí" | "y" | "yes"
+        ) {
+            *history = HistoryMap::default();
+            save_history(history)?;
+            println!("{}", color("Historial borrado.", GREEN));
+        } else {
+            println!("Operación cancelada.");
+        }
+        return Ok(());
+    }
+
     if history.is_empty() {
         println!("{}", color("Sin historial", YELLOW));
-        return;
+        return Ok(());
     }
 
-    let mut entries: Vec<_> = history.iter().collect();
-    entries.sort_by(|a, b| {
-        b.1.updated_at
-            .as_deref()
-            .unwrap_or("")
-            .cmp(a.1.updated_at.as_deref().unwrap_or(""))
-            .then_with(|| b.1.last_cap.cmp(&a.1.last_cap))
-    });
-
-    println!("\n{}", color("=== Historial ===", BOLD));
-    for (title, entry) in entries {
-        let ts = entry.updated_at.as_deref().unwrap_or("--");
-        println!(
-            "- {} {} cap {}{} ({})",
-            color(title, CYAN),
-            RESET,
-            color(entry.last_cap.to_string(), YELLOW),
-            RESET,
-            ts
-        );
+    for (title, entry) in ani_es_rs::history::sorted_by_recent(history) {
+        println!("{}", history_row(&title, &entry));
     }
-    println!();
+    Ok(())
+}
+
+fn watchlist_status_label(status: WatchlistStatus) -> &'static str {
+    match status {
+        WatchlistStatus::Planned => "Planeado",
+        WatchlistStatus::Watching => "Viendo",
+        WatchlistStatus::Completed => "Completado",
+    }
+}
+
+fn watchlist_row(title: &str, status: &str, added_at: &str, last_cap: u32) -> String {
+    let progress = if last_cap > 0 {
+        format!(" — episodio {last_cap}")
+    } else {
+        String::new()
+    };
+    format!("- {title} [{status}] (añadido: {added_at}){progress}")
+}
+
+fn parse_selected_title_slug(selection: &str) -> Option<(String, String)> {
+    let inner = selection.strip_suffix(')')?;
+    let (title, slug) = inner.rsplit_once(" (")?;
+    Some((title.to_string(), slug.to_string()))
+}
+
+fn history_row(title: &str, entry: &ani_es_rs::models::HistoryEntry) -> String {
+    let progress = if entry.progress.is_empty() {
+        "00:00:00"
+    } else {
+        &entry.progress
+    };
+    format!("{title} — episodio {} — {progress}", entry.last_cap.max(1))
+}
+
+fn show_history(
+    client: &Client,
+    history: &mut HistoryMap,
+    cache: &mut ScraperCache,
+    provider: &JkanimeProvider,
+) -> Result<()> {
+    loop {
+        if history.is_empty() {
+            println!("{}", color("Sin historial", YELLOW));
+            return Ok(());
+        }
+
+        let entries = ani_es_rs::history::sorted_by_recent(history);
+        let titles: Vec<String> = entries.iter().map(|(title, _)| title.clone()).collect();
+        let rows: Vec<String> = entries
+            .iter()
+            .map(|(title, entry)| history_row(title, entry))
+            .collect();
+
+        let selected = match select_from_list(&rows, "Historial (esc para volver): ", "~20")? {
+            Some(selected) => selected,
+            None => return Ok(()),
+        };
+        let Some(index) = rows.iter().position(|row| row == &selected) else {
+            continue;
+        };
+        let title = titles[index].clone();
+
+        let action = match select_from_list(
+            &["Continuar".into(), "Borrar".into(), "Volver".into()],
+            &format!("{}: ", title),
+            "~6",
+        )? {
+            Some(action) => action,
+            None => continue,
+        };
+
+        match action.as_str() {
+            "Continuar" => {
+                let Some(entry) = history.get(&title).cloned() else {
+                    continue;
+                };
+                let slug = if let Some(slug) = entry.slug.as_ref() {
+                    slug.clone()
+                } else {
+                    let results = match search_anime_cached(client, &title, cache) {
+                        Ok(results) => results,
+                        Err(error) => {
+                            eprintln!(
+                                "No se pudo buscar el anime ({error:#}). Continúa manualmente en {}.",
+                                history_row(&title, &entry)
+                            );
+                            continue;
+                        }
+                    };
+                    if results.is_empty() {
+                        println!(
+                            "No se encontraron resultados; continúa manualmente en {}.",
+                            history_row(&title, &entry)
+                        );
+                        continue;
+                    }
+                    let result = if results.len() == 1 {
+                        results[0].clone()
+                    } else {
+                        let options: Vec<String> = results
+                            .iter()
+                            .map(|result| format!("{} ({})", result.title, result.slug))
+                            .collect();
+                        let Some(choice) =
+                            select_from_list(&options, "Selecciona el anime correcto: ", "40%")?
+                        else {
+                            continue;
+                        };
+                        let Some((_, slug)) = parse_selected_title_slug(&choice) else {
+                            continue;
+                        };
+                        AnimeSearchResult {
+                            title: title.clone(),
+                            slug,
+                        }
+                    };
+                    result.slug
+                };
+
+                if entry.last_cap == 0 {
+                    println!("No hay episodio guardado; comienza desde el episodio 1.");
+                }
+                if let Err(error) = play_anime(
+                    client,
+                    history,
+                    &title,
+                    &slug,
+                    entry.last_cap.max(1),
+                    &entry.progress,
+                    false,
+                    false,
+                    cache,
+                    provider,
+                ) {
+                    eprintln!(
+                        "No se pudo reanudar ({error:#}). Continúa manualmente en {}.",
+                        history_row(&title, &entry)
+                    );
+                }
+            }
+            "Borrar" => {
+                let confirmation = select_from_list(
+                    &["Confirmar borrado".into(), "Cancelar".into()],
+                    &format!("¿Borrar '{}' del historial? ", title),
+                    "~5",
+                )?;
+                if confirmation.as_deref() == Some("Confirmar borrado")
+                    && ani_es_rs::history::delete_history(history, &title)
+                {
+                    save_history(history)?;
+                    println!(
+                        "{}",
+                        color(format!("'{}' eliminado del historial.", title), GREEN)
+                    );
+                }
+            }
+            _ => continue,
+        }
+    }
 }
 
 fn run_continue(
@@ -312,17 +498,9 @@ fn run_continue(
                 let selected =
                     select_from_list(&options, "Selecciona el anime para continuar:", "40%");
                 if let Ok(Some(sel)) = selected {
-                    if let Some(inner) = sel.strip_suffix(')') {
-                        if let Some((title, slug)) = inner.rsplit_once(" (") {
-                            AnimeSearchResult {
-                                title: title.to_string(),
-                                slug: slug.to_string(),
-                            }
-                        } else {
-                            results.into_iter().next().unwrap()
-                        }
-                    } else {
-                        results.into_iter().next().unwrap()
+                    match parse_selected_title_slug(&sel) {
+                        Some((title, slug)) => AnimeSearchResult { title, slug },
+                        None => results.into_iter().next().unwrap(),
                     }
                 } else {
                     return Ok(());
@@ -643,11 +821,7 @@ fn show_watchlist_menu(
                 let titles: Vec<String> = entries
                     .iter()
                     .map(|(title, entry)| {
-                        let status = match entry.status {
-                            WatchlistStatus::Planned => "Planeado",
-                            WatchlistStatus::Watching => "Viendo",
-                            WatchlistStatus::Completed => "Completado",
-                        };
+                        let status = watchlist_status_label(entry.status.clone());
                         format!("{} [{}]", title, status)
                     })
                     .collect();
@@ -749,20 +923,10 @@ fn show_watchlist_menu(
                         .collect();
                     let sel = select_from_list(&options, "Selecciona:", "~10");
                     match sel {
-                        Ok(Some(s)) => {
-                            if let Some(inner) = s.strip_suffix(')') {
-                                if let Some((t, slug)) = inner.rsplit_once(" (") {
-                                    AnimeSearchResult {
-                                        title: t.to_string(),
-                                        slug: slug.to_string(),
-                                    }
-                                } else {
-                                    results.into_iter().next().unwrap()
-                                }
-                            } else {
-                                results.into_iter().next().unwrap()
-                            }
-                        }
+                        Ok(Some(s)) => match parse_selected_title_slug(&s) {
+                            Some((title, slug)) => AnimeSearchResult { title, slug },
+                            None => results.into_iter().next().unwrap(),
+                        },
                         _ => continue,
                     }
                 };
@@ -783,12 +947,125 @@ fn show_watchlist_menu(
 
 #[cfg(test)]
 mod tests {
-    use super::next_episode;
+    use super::*;
+    use ani_es_rs::models::HistoryEntry;
+
+    #[test]
+    fn parses_positional_query_and_episode_flags() {
+        let args =
+            Args::try_parse_from(["ani-es-rs", "bleach", "--episode", "3", "--no-fzf"]).unwrap();
+        assert_eq!(args.query.as_deref(), Some("bleach"));
+        assert_eq!(args.episode, Some(3));
+        assert!(args.no_fzf);
+        assert!(!args.auto_next);
+        assert!(args.command.is_none());
+    }
+
+    #[test]
+    fn parses_continue_flag() {
+        let args = Args::try_parse_from(["ani-es-rs", "--continue"]).unwrap();
+        assert!(args.r#continue);
+    }
+
+    #[test]
+    fn parses_watchlist_add_subcommand() {
+        let args = Args::try_parse_from(["ani-es-rs", "watchlist", "add", "Bleach"]).unwrap();
+        match args.command {
+            Some(Commands::Watchlist {
+                action: WatchlistAction::Add { title },
+            }) => assert_eq!(title, "Bleach"),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_history_clear_subcommand() {
+        let args = Args::try_parse_from(["ani-es-rs", "history", "--clear"]).unwrap();
+        match args.command {
+            Some(Commands::History { clear }) => assert!(clear),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_update_check_flag() {
+        let args = Args::try_parse_from(["ani-es-rs", "update", "--check"]).unwrap();
+        match args.command {
+            Some(Commands::Update { check, yes }) => {
+                assert!(check);
+                assert!(!yes);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_flags() {
+        assert!(Args::try_parse_from(["ani-es-rs", "--nope"]).is_err());
+    }
+
+    #[test]
+    fn history_row_shows_saved_episode_and_position() {
+        let entry = HistoryEntry {
+            last_cap: 2,
+            progress: "00:14:05".to_string(),
+            ..HistoryEntry::default()
+        };
+
+        assert_eq!(
+            history_row("Bleach", &entry),
+            "Bleach — episodio 2 — 00:14:05"
+        );
+    }
+
+    #[test]
+    fn watchlist_status_label_maps_each_status() {
+        assert_eq!(watchlist_status_label(WatchlistStatus::Planned), "Planeado");
+        assert_eq!(watchlist_status_label(WatchlistStatus::Watching), "Viendo");
+        assert_eq!(
+            watchlist_status_label(WatchlistStatus::Completed),
+            "Completado"
+        );
+    }
+
+    #[test]
+    fn watchlist_row_appends_episode_only_when_history_has_progress() {
+        let added_at = "2026-01-01T00:00:00Z";
+        assert_eq!(
+            watchlist_row("Bleach", "Viendo", added_at, 5),
+            "- Bleach [Viendo] (añadido: 2026-01-01T00:00:00Z) — episodio 5"
+        );
+        assert_eq!(
+            watchlist_row("Bleach", "Viendo", added_at, 0),
+            "- Bleach [Viendo] (añadido: 2026-01-01T00:00:00Z)"
+        );
+    }
 
     #[test]
     fn next_episode_respects_limit_and_integer_boundary() {
         assert_eq!(next_episode(2, 3), Some(3));
         assert_eq!(next_episode(3, 3), None);
         assert_eq!(next_episode(u32::MAX, u32::MAX), None);
+    }
+
+    #[test]
+    fn parses_title_and_slug_from_selection() {
+        assert_eq!(
+            parse_selected_title_slug("Bleach (https://jkanime.net/bleach/)"),
+            Some((
+                "Bleach".to_string(),
+                "https://jkanime.net/bleach/".to_string()
+            ))
+        );
+        assert_eq!(
+            parse_selected_title_slug("Naruto (/naruto/)"),
+            Some(("Naruto".to_string(), "/naruto/".to_string()))
+        );
+    }
+
+    #[test]
+    fn returns_none_for_selection_without_slug_suffix() {
+        assert_eq!(parse_selected_title_slug("Bleach"), None);
+        assert_eq!(parse_selected_title_slug(""), None);
     }
 }

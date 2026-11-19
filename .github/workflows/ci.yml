@@ -21,3 +21,10 @@ jobs:
       - run: cargo check --all-targets
       - run: cargo test --all-targets
       - run: cargo build --release --locked
+      - name: Check Unix installer (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: bash -n install.sh tests/installers.sh && bash tests/installers.sh
+      - name: Parse Windows installer (Windows PowerShell 5.1)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: .\install.ps1 -Help

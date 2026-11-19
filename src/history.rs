@@ -30,6 +30,26 @@ mod tests {
     }
 
     #[test]
+    fn delete_history_removes_only_the_requested_title() {
+        let mut map = HistoryMap::default();
+        map.insert("Bleach".to_string(), HistoryEntry::default());
+        map.insert("Naruto".to_string(), HistoryEntry::default());
+
+        assert!(delete_history(&mut map, "Bleach"));
+        assert!(!map.contains_key("Bleach"));
+        assert!(map.contains_key("Naruto"));
+    }
+
+    #[test]
+    fn delete_history_returns_false_for_unknown_title() {
+        let mut map = HistoryMap::default();
+        map.insert("Bleach".to_string(), HistoryEntry::default());
+
+        assert!(!delete_history(&mut map, "Unknown"));
+        assert!(map.contains_key("Bleach"));
+    }
+
+    #[test]
     fn test_update_history() {
         let mut map = HistoryMap::default();
         update_history(
@@ -68,6 +88,39 @@ mod tests {
         );
 
         assert_eq!(latest_anime(&map).as_deref(), Some("Recent series"));
+    }
+
+    #[test]
+    fn sorted_by_recent_orders_by_timestamp_descending_then_episode_descending() {
+        let mut map = HistoryMap::default();
+        map.insert(
+            "Old".to_string(),
+            HistoryEntry {
+                last_cap: 200,
+                updated_at: Some("2026-01-01 10:00:00".to_string()),
+                ..HistoryEntry::default()
+            },
+        );
+        map.insert(
+            "Recent".to_string(),
+            HistoryEntry {
+                last_cap: 3,
+                updated_at: Some("2026-02-01 10:00:00".to_string()),
+                ..HistoryEntry::default()
+            },
+        );
+        map.insert(
+            "SameTime".to_string(),
+            HistoryEntry {
+                last_cap: 9,
+                updated_at: Some("2026-02-01 10:00:00".to_string()),
+                ..HistoryEntry::default()
+            },
+        );
+
+        let sorted = sorted_by_recent(&map);
+        let titles: Vec<&str> = sorted.iter().map(|(title, _)| title.as_str()).collect();
+        assert_eq!(titles, vec!["SameTime", "Recent", "Old"]);
     }
 
     #[test]
@@ -286,6 +339,21 @@ pub fn get_last_cap(map: &HistoryMap, anime: &str) -> u32 {
     map.get(anime).map(|e| e.last_cap).unwrap_or(0)
 }
 
+pub fn sorted_by_recent(map: &HistoryMap) -> Vec<(String, HistoryEntry)> {
+    let mut entries: Vec<(String, HistoryEntry)> = map
+        .iter()
+        .map(|(title, entry)| (title.clone(), entry.clone()))
+        .collect();
+    entries.sort_by(|a, b| {
+        b.1.updated_at
+            .as_deref()
+            .unwrap_or("")
+            .cmp(a.1.updated_at.as_deref().unwrap_or(""))
+            .then_with(|| b.1.last_cap.cmp(&a.1.last_cap))
+    });
+    entries
+}
+
 pub fn latest_anime(map: &HistoryMap) -> Option<String> {
     map.iter()
         .max_by(|(_, a), (_, b)| {
@@ -302,6 +370,10 @@ pub fn get_progress(map: &HistoryMap, anime: &str) -> String {
     map.get(anime)
         .map(|e| e.progress.clone())
         .unwrap_or_else(|| "00:00:00".to_string())
+}
+
+pub fn delete_history(map: &mut HistoryMap, anime: &str) -> bool {
+    map.remove(anime).is_some()
 }
 
 pub fn update_history(
