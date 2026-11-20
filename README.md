@@ -23,6 +23,8 @@ Inspired by [ani-es](https://github.com/Zhuchii/ani-es), focused on Spanish-lang
 * 🎯 Modo no interactivo: `--no-fzf`, `--episode`, `--auto-next`
 * 📋 Watchlist: `ani-es-rs watchlist list` muestra el estado y el último episodio visto, ordenado por fecha de alta
 * 🔄 Auto-next episode: continúa automáticamente con el siguiente episodio
+* 🔌 Proveedores seleccionables desde el menú: `jkanime` (predeterminado) y `animeav1` (`--provider animeav1`)
+* 🌐 Menú por capítulo para elegir pistas de audio y subtítulos que mpv detecte
 
 ---
 
@@ -93,6 +95,17 @@ O directamente:
 ```bash
 ani-es-rs naruto
 ```
+
+Selecciona AnimeAV1 explícitamente; JKAnime sigue siendo el proveedor predeterminado:
+
+```bash
+ani-es-rs --provider animeav1 bleach
+ani-es-rs --provider animeav1 --no-fzf --episode 3 bleach
+```
+
+En el menú principal puedes elegir **Cambiar proveedor**; el cambio se mantiene durante esa sesión. Al reproducir un capítulo en modo interactivo, si mpv detecta varias pistas de audio o al menos una pista de subtítulos, el reproductor queda pausado mientras eliges. Si no detecta pistas o usas `--no-fzf`, conserva la selección predeterminada de mpv.
+
+Si guardas historial o watchlist con AnimeAV1, usa `--provider animeav1` para reanudar o administrar esas entradas. Los registros antiguos sin proveedor se interpretan como JKAnime; `--continue` elige el registro más reciente del proveedor activo. La persistencia usa el título como clave y no admite dos entradas con el mismo título exacto en proveedores distintos: el CLI rechazará ese conflicto en vez de sobrescribirlo o eliminarlo silenciosamente. Los enlaces de AnimeAV1 pueden ser páginas de reproductores externos; no todos se pueden abrir directamente con mpv y la reproducción aún depende del servidor/embed.
 
 ```bash
 ani-es-rs history

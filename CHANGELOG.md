@@ -1,6 +1,14 @@
 ## [Unreleased]
 
+### Added
+- Proveedor seleccionable AnimeAV1 con `--provider animeav1`; JKAnime sigue como opción predeterminada.
+- Helpers públicos de búsqueda, detalle y fuente de video parametrizados por `AnimeProvider`.
+
 ### Changed
+- Desde el menú principal se puede cambiar de proveedor durante la sesión; el reproductor ofrece selección de audio/subtítulos por capítulo cuando mpv expone esas pistas.
+- El historial y la watchlist guardan el proveedor; los registros antiguos siguen leyéndose como JKAnime y `--continue` filtra por el proveedor activo.
+- Las operaciones de reproducción y watchlist rechazan conflictos entre proveedores para evitar reutilizar o sobrescribir entradas por título.
+- El selector de resultados conserva el slug para distinguir títulos duplicados.
 - Linux/macOS installers download the latest published binary, verify `SHA256SUMS`, and install without requiring Rust; Windows uses the PowerShell installer and verifies the release asset.
 - README installation instructions now surface the platform-specific install paths and supported prebuilt architectures.
 - Added repository, README, keyword, and category metadata to the Cargo manifest to improve package discovery.

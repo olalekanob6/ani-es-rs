@@ -1,16 +1,27 @@
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use reqwest::blocking::Client;
 use std::io::Write;
 
 use ani_es_rs::{
-    add_watchlist, color, fetch_anime_detail, info, init as init_logger, latest_anime,
-    load_history, load_watchlist, mark_status, migrate_legacy_db_if_exists,
-    models::AnimeSearchResult, play_video, prompt_search, providers::AnimeProvider,
-    providers::JkanimeProvider, remove_watchlist, save_history, scraper::search_anime_cached,
+    add_watchlist_for_provider, color, ensure_entry_provider, fetch_anime_detail_with_provider,
+    fetch_video_source_with_provider, info, init as init_logger, load_history, load_watchlist,
+    mark_status, migrate_legacy_db_if_exists,
+    models::AnimeSearchResult,
+    play_video, play_video_with_track_menu, prompt_search,
+    providers::{AnimeAv1Provider, AnimeProvider, JkanimeProvider},
+    remove_watchlist, save_history,
+    scraper::search_anime_cached_with_provider,
     select_episode, select_from_list, select_post_episode_action, set_color_enabled, Config,
     HistoryMap, ScraperCache, WatchlistStatus, BOLD, CYAN, GREEN, RED, YELLOW,
 };
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ProviderChoice {
+    Jkanime,
+    #[value(name = "animeav1")]
+    AnimeAv1,
+}
 
 #[derive(Parser, Debug)]
 #[command(author, version, about = "Ver anime en español desde la terminal", long_about = None)]
@@ -33,6 +44,10 @@ struct Args {
     /// Reproducir automáticamente todos los episodios
     #[arg(long)]
     auto_next: bool,
+
+    /// Proveedor de anime
+    #[arg(long, value_enum, default_value = "jkanime", global = true)]
+    provider: ProviderChoice,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -78,11 +93,34 @@ enum WatchlistAction {
     MarkPlanned { title: String },
 }
 
+fn create_provider(choice: ProviderChoice) -> Box<dyn AnimeProvider> {
+    match choice {
+        ProviderChoice::Jkanime => Box::new(JkanimeProvider::new()),
+        ProviderChoice::AnimeAv1 => Box::new(AnimeAv1Provider::new()),
+    }
+}
+
+fn provider_choice_from_menu(label: &str) -> Option<ProviderChoice> {
+    match label {
+        "JKAnime" => Some(ProviderChoice::Jkanime),
+        "AnimeAV1" => Some(ProviderChoice::AnimeAv1),
+        _ => None,
+    }
+}
+
+fn provider_display_name(choice: ProviderChoice) -> &'static str {
+    match choice {
+        ProviderChoice::Jkanime => "JKAnime",
+        ProviderChoice::AnimeAv1 => "AnimeAV1",
+    }
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
     if let Some(Commands::Update { check, yes }) = args.command.as_ref() {
         return ani_es_rs::update::run(*check, *yes);
     }
+    let provider = create_provider(args.provider);
     let config = Config::load_checked()?;
     set_color_enabled(config.app.color);
     init_logger(&config.app.log_level);
@@ -93,14 +131,18 @@ fn main() -> Result<()> {
     let mut cache = ScraperCache::new();
 
     let client = JkanimeProvider::build_client_with_timeout(config.app.timeout_seconds)?;
-    let provider = JkanimeProvider::new();
 
     match args.command {
         Some(Commands::Watchlist { action }) => {
             let mut watchlist = load_watchlist()?;
             match action {
                 WatchlistAction::Add { title } => {
-                    let results = search_anime_cached(&client, &title, &mut cache)?;
+                    let results = search_anime_cached_with_provider(
+                        &client,
+                        provider.as_ref(),
+                        &title,
+                        &mut cache,
+                    )?;
                     let selected = results
                         .iter()
                         .find(|result| result.title.eq_ignore_ascii_case(title.trim()))
@@ -108,10 +150,11 @@ fn main() -> Result<()> {
                         .ok_or_else(|| {
                             anyhow::anyhow!("No se encontraron resultados para '{title}'")
                         })?;
-                    add_watchlist(
+                    add_watchlist_for_provider(
                         &mut watchlist,
                         selected.title.clone(),
                         selected.slug.clone(),
+                        provider.name(),
                     )?;
                     println!(
                         "{}",
@@ -119,6 +162,7 @@ fn main() -> Result<()> {
                     );
                 }
                 WatchlistAction::Remove { title } => {
+                    ensure_entry_provider(&watchlist, &title, provider.name())?;
                     remove_watchlist(&mut watchlist, &title)?;
                     println!(
                         "{}",
@@ -132,7 +176,30 @@ fn main() -> Result<()> {
                         let mut entries: Vec<_> = watchlist.iter().collect();
                         entries.sort_by(|a, b| a.1.added_at.cmp(&b.1.added_at));
                         for (title, entry) in entries {
-                            let last_cap = ani_es_rs::history::get_last_cap(&history, title);
+                            let last_cap = if ensure_provider_matches(
+                                entry.provider.as_deref(),
+                                provider.as_ref(),
+                                "watchlist",
+                                title,
+                            )
+                            .is_ok()
+                            {
+                                history
+                                    .get(title)
+                                    .filter(|history_entry| {
+                                        ensure_provider_matches(
+                                            history_entry.provider.as_deref(),
+                                            provider.as_ref(),
+                                            "historial",
+                                            title,
+                                        )
+                                        .is_ok()
+                                    })
+                                    .map(|history_entry| history_entry.last_cap)
+                                    .unwrap_or(0)
+                            } else {
+                                0
+                            };
                             println!(
                                 "{}",
                                 watchlist_row(
@@ -146,6 +213,7 @@ fn main() -> Result<()> {
                     }
                 }
                 WatchlistAction::MarkWatching { title } => {
+                    ensure_entry_provider(&watchlist, &title, provider.name())?;
                     mark_status(&mut watchlist, &title, WatchlistStatus::Watching)?;
                     println!(
                         "{}",
@@ -153,6 +221,7 @@ fn main() -> Result<()> {
                     );
                 }
                 WatchlistAction::MarkCompleted { title } => {
+                    ensure_entry_provider(&watchlist, &title, provider.name())?;
                     mark_status(&mut watchlist, &title, WatchlistStatus::Completed)?;
                     println!(
                         "{}",
@@ -160,6 +229,7 @@ fn main() -> Result<()> {
                     );
                 }
                 WatchlistAction::MarkPlanned { title } => {
+                    ensure_entry_provider(&watchlist, &title, provider.name())?;
                     mark_status(&mut watchlist, &title, WatchlistStatus::Planned)?;
                     println!(
                         "{}",
@@ -178,7 +248,13 @@ fn main() -> Result<()> {
     }
 
     if args.r#continue {
-        run_continue(&client, &mut history, &mut cache, &provider, args.no_fzf)?;
+        run_continue(
+            &client,
+            &mut history,
+            &mut cache,
+            provider.as_ref(),
+            args.no_fzf,
+        )?;
         return Ok(());
     }
 
@@ -192,30 +268,43 @@ fn main() -> Result<()> {
             args.no_fzf,
             args.auto_next,
             &mut cache,
-            &provider,
+            provider.as_ref(),
         )?;
         return Ok(());
     }
 
-    run_main_menu(&client, &mut history, &mut cache, &provider)
+    run_main_menu(&client, &mut history, &mut cache, args.provider)
 }
 
 fn run_main_menu(
     client: &Client,
     history: &mut HistoryMap,
     cache: &mut ScraperCache,
-    provider: &JkanimeProvider,
+    initial_provider: ProviderChoice,
 ) -> Result<()> {
+    let mut provider = create_provider(initial_provider);
+    let mut provider_choice = initial_provider;
     loop {
         let options = vec![
             color("Buscar anime", BOLD),
             color("Continuar ultimo", BOLD),
             color("Historial", BOLD),
             color("Watchlist", BOLD),
+            color("Cambiar proveedor", BOLD),
             color("Salir", BOLD),
         ];
 
-        let action = match select_from_list(&options, &color("Menu principal: ", CYAN), "~8") {
+        let action = match select_from_list(
+            &options,
+            &color(
+                format!(
+                    "Menu principal — {}: ",
+                    provider_display_name(provider_choice)
+                ),
+                CYAN,
+            ),
+            "~8",
+        ) {
             Ok(Some(a)) => a,
             Ok(None) => {
                 println!("{}", color("Hasta luego", GREEN));
@@ -234,6 +323,28 @@ fn run_main_menu(
         };
 
         match action.as_str() {
+            "Cambiar proveedor" => {
+                let choices = vec![
+                    "JKAnime".to_string(),
+                    "AnimeAV1".to_string(),
+                    "Volver".to_string(),
+                ];
+                let selected = match select_from_list(&choices, "Proveedor:", "~6") {
+                    Ok(Some(choice)) => choice,
+                    Ok(None) | Err(_) => continue,
+                };
+                if let Some(choice) = provider_choice_from_menu(&selected) {
+                    provider_choice = choice;
+                    provider = create_provider(choice);
+                    println!(
+                        "{}",
+                        color(
+                            format!("Proveedor activo: {}", provider_display_name(choice)),
+                            GREEN
+                        )
+                    );
+                }
+            }
             "Buscar anime" => {
                 let query = match prompt_search("") {
                     Ok(q) => q,
@@ -243,21 +354,28 @@ fn run_main_menu(
                     continue;
                 }
                 if let Err(error) = run_search_and_play(
-                    client, history, &query, None, false, false, cache, provider,
+                    client,
+                    history,
+                    &query,
+                    None,
+                    false,
+                    false,
+                    cache,
+                    provider.as_ref(),
                 ) {
                     eprintln!("{}", color(format!("Error: {error:#}"), RED));
                 }
             }
             "Continuar ultimo" => {
-                if let Err(error) = run_continue(client, history, cache, provider, false) {
+                if let Err(error) = run_continue(client, history, cache, provider.as_ref(), false) {
                     eprintln!("{}", color(format!("Error: {error:#}"), RED));
                 }
             }
             "Historial" => {
-                show_history(client, history, cache, provider)?;
+                show_history(client, history, cache, provider.as_ref())?;
             }
             "Watchlist" => {
-                show_watchlist_menu(client, history, cache, provider)?;
+                show_watchlist_menu(client, history, cache, provider.as_ref())?;
             }
             "Salir" => {
                 println!("{}", color("Hasta luego", GREEN));
@@ -323,6 +441,29 @@ fn parse_selected_title_slug(selection: &str) -> Option<(String, String)> {
     Some((title.to_string(), slug.to_string()))
 }
 
+fn find_selected_result<'a>(
+    results: &'a [AnimeSearchResult],
+    selection: &str,
+) -> Option<&'a AnimeSearchResult> {
+    let (_, slug) = parse_selected_title_slug(selection)?;
+    results.iter().find(|result| result.slug == slug)
+}
+
+fn ensure_provider_matches(
+    saved_provider: Option<&str>,
+    active_provider: &dyn AnimeProvider,
+    entry_kind: &str,
+    title: &str,
+) -> Result<()> {
+    let saved_provider = saved_provider.unwrap_or("jkanime");
+    if saved_provider != active_provider.name() {
+        anyhow::bail!(
+            "{entry_kind} '{title}' está guardado con el proveedor '{saved_provider}'. Repite el comando con `--provider {saved_provider}`."
+        );
+    }
+    Ok(())
+}
+
 fn history_row(title: &str, entry: &ani_es_rs::models::HistoryEntry) -> String {
     let progress = if entry.progress.is_empty() {
         "00:00:00"
@@ -336,7 +477,7 @@ fn show_history(
     client: &Client,
     history: &mut HistoryMap,
     cache: &mut ScraperCache,
-    provider: &JkanimeProvider,
+    provider: &dyn AnimeProvider,
 ) -> Result<()> {
     loop {
         if history.is_empty() {
@@ -374,10 +515,21 @@ fn show_history(
                 let Some(entry) = history.get(&title).cloned() else {
                     continue;
                 };
+                if let Err(error) = ensure_provider_matches(
+                    entry.provider.as_deref(),
+                    provider,
+                    "historial",
+                    &title,
+                ) {
+                    eprintln!("{}", color(format!("{error}"), YELLOW));
+                    continue;
+                }
                 let slug = if let Some(slug) = entry.slug.as_ref() {
                     slug.clone()
                 } else {
-                    let results = match search_anime_cached(client, &title, cache) {
+                    let results = match search_anime_cached_with_provider(
+                        client, provider, &title, cache,
+                    ) {
                         Ok(results) => results,
                         Err(error) => {
                             eprintln!(
@@ -463,19 +615,22 @@ fn run_continue(
     client: &Client,
     history: &mut HistoryMap,
     cache: &mut ScraperCache,
-    provider: &JkanimeProvider,
+    provider: &dyn AnimeProvider,
     no_fzf: bool,
 ) -> Result<()> {
-    let last = latest_anime(history);
+    let last = ani_es_rs::history::latest_anime_for_provider(history, provider.name());
 
     if let Some(anime) = last {
+        if let Some(entry) = history.get(&anime) {
+            ensure_provider_matches(entry.provider.as_deref(), provider, "historial", &anime)?;
+        }
         let last_cap = ani_es_rs::history::get_last_cap(history, &anime);
         let progress = ani_es_rs::history::get_progress(history, &anime);
         let mut slug = history.get(&anime).and_then(|e| e.slug.clone());
 
         if slug.is_none() {
             println!("{}", color("Buscando anime para continuar...", YELLOW));
-            let results = match search_anime_cached(client, &anime, cache) {
+            let results = match search_anime_cached_with_provider(client, provider, &anime, cache) {
                 Ok(results) => results,
                 Err(error) => {
                     return Err(error).context("No se pudo buscar el anime para continuar")
@@ -528,9 +683,9 @@ fn run_search_and_play(
     no_fzf: bool,
     auto_next: bool,
     cache: &mut ScraperCache,
-    provider: &JkanimeProvider,
+    provider: &dyn AnimeProvider,
 ) -> Result<()> {
-    let results = match search_anime_cached(client, query, cache) {
+    let results = match search_anime_cached_with_provider(client, provider, query, cache) {
         Ok(r) => r,
         Err(e) => {
             return Err(e).context("Error buscando anime");
@@ -541,15 +696,15 @@ fn run_search_and_play(
         return Ok(());
     }
 
-    let selected_title = if no_fzf {
-        match results.first().map(|r| r.title.clone()) {
-            Some(t) => t,
-            None => return Ok(()),
-        }
+    let selected = if no_fzf {
+        results.first()
     } else {
-        let items: Vec<String> = results.iter().map(|r| r.title.clone()).collect();
+        let items: Vec<String> = results
+            .iter()
+            .map(|result| format!("{} ({})", result.title, result.slug))
+            .collect();
         match select_from_list(&items, &color("Selecciona una opción: ", CYAN), "~20") {
-            Ok(Some(t)) => t,
+            Ok(Some(selection)) => find_selected_result(&results, &selection),
             Ok(None) => return Ok(()),
             Err(_) => {
                 eprintln!("{}", color("Error: fzf no esta instalado.", RED));
@@ -557,26 +712,35 @@ fn run_search_and_play(
             }
         }
     };
-
-    let selected = match results.iter().find(|r| r.title == selected_title) {
-        Some(s) => s,
-        None => return Ok(()),
+    let Some(selected) = selected else {
+        return Ok(());
     };
 
-    let detail = match fetch_anime_detail(client, &selected.slug, cache) {
+    let detail = match fetch_anime_detail_with_provider(client, provider, &selected.slug, cache) {
         Ok(d) => d,
         Err(e) => {
             return Err(e).context("Error obteniendo detalle del anime");
         }
     };
+    if let Some(entry) = history.get(&detail.title) {
+        ensure_provider_matches(
+            entry.provider.as_deref(),
+            provider,
+            "historial",
+            &detail.title,
+        )?;
+    }
     println!("Anime: {}", color(&detail.title, BOLD));
     println!(
         "Episodios: {}",
         color(detail.total_episodes.to_string(), GREEN)
     );
 
-    let last_cap = ani_es_rs::history::get_last_cap(history, &detail.title);
-    let progress = ani_es_rs::history::get_progress(history, &detail.title);
+    let progress_entry = history.get(&detail.title);
+    let (last_cap, progress) = match progress_entry {
+        Some(entry) => (entry.last_cap, entry.progress.clone()),
+        None => (0, "00:00:00".to_string()),
+    };
 
     if episode.is_some() || no_fzf {
         let ep = episode.unwrap_or(1);
@@ -649,45 +813,59 @@ fn play_anime(
     auto_next: bool,
     no_fzf: bool,
     cache: &mut ScraperCache,
-    provider: &JkanimeProvider,
+    provider: &dyn AnimeProvider,
 ) -> Result<()> {
-    let detail = fetch_anime_detail(client, slug, cache)?;
+    let detail = fetch_anime_detail_with_provider(client, provider, slug, cache)?;
     if episode == 0 || episode > detail.total_episodes {
         anyhow::bail!(
             "Episodio {episode} fuera de rango (1-{})",
             detail.total_episodes
         );
     }
-    let source = provider.video_source(client, &detail.slug, episode)?;
+    let source = fetch_video_source_with_provider(client, provider, &detail.slug, episode)?;
     let episode_label = format!("{}-{}", title, episode);
 
-    let pos = play_video(&source.url, progress, &episode_label)?;
-    ani_es_rs::history::update_history(history, title, episode, &pos, Some(detail.slug.clone()));
+    let play_episode = if no_fzf {
+        play_video
+    } else {
+        play_video_with_track_menu
+    };
+    let pos = play_episode(&source.url, progress, &episode_label)?;
+    ani_es_rs::history::update_history_for_provider(
+        history,
+        title,
+        episode,
+        &pos,
+        Some(detail.slug.clone()),
+        provider.name(),
+    );
     save_history(history)?;
 
     if auto_next {
         if episode < detail.total_episodes {
             for next in (episode + 1)..=detail.total_episodes {
                 println!("Siguiente: {}-{}", title, next);
-                let source = match provider.video_source(client, &detail.slug, next) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        return Err(e).context("Error obteniendo el siguiente episodio");
-                    }
-                };
-                let pos = match play_video(&source.url, "00:00:00", &format!("{}-{}", title, next))
-                {
-                    Ok(p) => p,
-                    Err(e) => {
-                        return Err(e).context("Error reproduciendo el siguiente episodio");
-                    }
-                };
-                ani_es_rs::history::update_history(
+                let source =
+                    match fetch_video_source_with_provider(client, provider, &detail.slug, next) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            return Err(e).context("Error obteniendo el siguiente episodio");
+                        }
+                    };
+                let pos =
+                    match play_episode(&source.url, "00:00:00", &format!("{}-{}", title, next)) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            return Err(e).context("Error reproduciendo el siguiente episodio");
+                        }
+                    };
+                ani_es_rs::history::update_history_for_provider(
                     history,
                     title,
                     next,
                     &pos,
                     Some(detail.slug.clone()),
+                    provider.name(),
                 );
                 save_history(history)?;
             }
@@ -715,28 +893,30 @@ fn play_anime(
                     println!("{}", color("No hay más episodios.", YELLOW));
                     break;
                 };
-                let source = match provider.video_source(client, &detail.slug, next) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        eprintln!("{}", color(format!("Error obteniendo video: {}", e), RED));
-                        break;
-                    }
-                };
-                let pos = match play_video(&source.url, "00:00:00", &format!("{}-{}", title, next))
-                {
-                    Ok(p) => p,
-                    Err(e) => {
-                        eprintln!("{}", color(format!("Error reproduciendo: {}", e), RED));
-                        break;
-                    }
-                };
+                let source =
+                    match fetch_video_source_with_provider(client, provider, &detail.slug, next) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            eprintln!("{}", color(format!("Error obteniendo video: {}", e), RED));
+                            break;
+                        }
+                    };
+                let pos =
+                    match play_episode(&source.url, "00:00:00", &format!("{}-{}", title, next)) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            eprintln!("{}", color(format!("Error reproduciendo: {}", e), RED));
+                            break;
+                        }
+                    };
                 episode = next;
-                ani_es_rs::history::update_history(
+                ani_es_rs::history::update_history_for_provider(
                     history,
                     title,
                     episode,
                     &pos,
                     Some(detail.slug.clone()),
+                    provider.name(),
                 );
                 save_history(history)?;
             }
@@ -746,28 +926,30 @@ fn play_anime(
                     continue;
                 }
                 let prev = episode - 1;
-                let source = match provider.video_source(client, &detail.slug, prev) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        eprintln!("{}", color(format!("Error obteniendo video: {}", e), RED));
-                        break;
-                    }
-                };
-                let pos = match play_video(&source.url, "00:00:00", &format!("{}-{}", title, prev))
-                {
-                    Ok(p) => p,
-                    Err(e) => {
-                        eprintln!("{}", color(format!("Error reproduciendo: {}", e), RED));
-                        break;
-                    }
-                };
+                let source =
+                    match fetch_video_source_with_provider(client, provider, &detail.slug, prev) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            eprintln!("{}", color(format!("Error obteniendo video: {}", e), RED));
+                            break;
+                        }
+                    };
+                let pos =
+                    match play_episode(&source.url, "00:00:00", &format!("{}-{}", title, prev)) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            eprintln!("{}", color(format!("Error reproduciendo: {}", e), RED));
+                            break;
+                        }
+                    };
                 episode = prev;
-                ani_es_rs::history::update_history(
+                ani_es_rs::history::update_history_for_provider(
                     history,
                     title,
                     episode,
                     &pos,
                     Some(detail.slug.clone()),
+                    provider.name(),
                 );
                 save_history(history)?;
             }
@@ -788,7 +970,7 @@ fn show_watchlist_menu(
     client: &Client,
     history: &mut HistoryMap,
     cache: &mut ScraperCache,
-    provider: &JkanimeProvider,
+    provider: &dyn AnimeProvider,
 ) -> Result<()> {
     loop {
         let mut watchlist = load_watchlist()?;
@@ -856,16 +1038,39 @@ fn show_watchlist_menu(
 
                 match entry_action.as_str() {
                     "Reproducir" => {
-                        let slug = watchlist
-                            .get(selected_title)
-                            .map(|e| e.slug.clone())
-                            .unwrap_or_default();
+                        let Some(entry) = watchlist.get(selected_title) else {
+                            continue;
+                        };
+                        if let Err(error) = ensure_provider_matches(
+                            entry.provider.as_deref(),
+                            provider,
+                            "watchlist",
+                            selected_title,
+                        ) {
+                            eprintln!("{}", color(format!("{error}"), YELLOW));
+                            continue;
+                        }
+                        let slug = entry.slug.clone();
                         if slug.is_empty() {
                             println!("{}", color("Slug vacio para este anime.", RED));
                             continue;
                         }
-                        let last_cap = ani_es_rs::history::get_last_cap(history, selected_title);
-                        let progress = ani_es_rs::history::get_progress(history, selected_title);
+                        if let Some(history_entry) = history.get(selected_title) {
+                            if let Err(error) = ensure_provider_matches(
+                                history_entry.provider.as_deref(),
+                                provider,
+                                "historial",
+                                selected_title,
+                            ) {
+                                eprintln!("{}", color(format!("{error}"), YELLOW));
+                                continue;
+                            }
+                        }
+                        let progress_entry = history.get(selected_title);
+                        let (last_cap, progress) = match progress_entry {
+                            Some(entry) => (entry.last_cap, entry.progress.clone()),
+                            None => (0, "00:00:00".to_string()),
+                        };
                         play_anime(
                             client,
                             history,
@@ -880,15 +1085,19 @@ fn show_watchlist_menu(
                         )?;
                     }
                     "Marcar como viendo" => {
+                        ensure_entry_provider(&watchlist, selected_title, provider.name())?;
                         mark_status(&mut watchlist, selected_title, WatchlistStatus::Watching)?;
                     }
                     "Marcar como completado" => {
+                        ensure_entry_provider(&watchlist, selected_title, provider.name())?;
                         mark_status(&mut watchlist, selected_title, WatchlistStatus::Completed)?;
                     }
                     "Marcar como planeado" => {
+                        ensure_entry_provider(&watchlist, selected_title, provider.name())?;
                         mark_status(&mut watchlist, selected_title, WatchlistStatus::Planned)?;
                     }
                     "Eliminar" => {
+                        ensure_entry_provider(&watchlist, selected_title, provider.name())?;
                         remove_watchlist(&mut watchlist, selected_title)?;
                     }
                     _ => break,
@@ -902,13 +1111,14 @@ fn show_watchlist_menu(
                 if title.is_empty() {
                     continue;
                 }
-                let results = match search_anime_cached(client, &title, cache) {
-                    Ok(r) => r,
-                    Err(error) => {
-                        eprintln!("{}", color(format!("Error buscando anime: {error:#}"), RED));
-                        continue;
-                    }
-                };
+                let results =
+                    match search_anime_cached_with_provider(client, provider, &title, cache) {
+                        Ok(r) => r,
+                        Err(error) => {
+                            eprintln!("{}", color(format!("Error buscando anime: {error:#}"), RED));
+                            continue;
+                        }
+                    };
                 if results.is_empty() {
                     println!("{}", color("No se encontraron resultados.", YELLOW));
                     continue;
@@ -932,7 +1142,12 @@ fn show_watchlist_menu(
                 };
 
                 let mut wl = load_watchlist()?;
-                add_watchlist(&mut wl, selected.title.clone(), selected.slug.clone())?;
+                add_watchlist_for_provider(
+                    &mut wl,
+                    selected.title.clone(),
+                    selected.slug.clone(),
+                    provider.name(),
+                )?;
                 println!(
                     "{}",
                     color(format!("'{}' añadido a watchlist.", selected.title), GREEN)
@@ -949,6 +1164,76 @@ fn show_watchlist_menu(
 mod tests {
     use super::*;
     use ani_es_rs::models::HistoryEntry;
+
+    #[test]
+    fn saved_entries_require_their_original_provider() {
+        let animeav1 = AnimeAv1Provider::new();
+        let error = ensure_provider_matches(
+            Some("animeav1"),
+            &JkanimeProvider::new(),
+            "historial",
+            "One Piece",
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("--provider animeav1"));
+        assert!(
+            ensure_provider_matches(None, &JkanimeProvider::new(), "watchlist", "Bleach").is_ok()
+        );
+        assert!(
+            ensure_provider_matches(Some("animeav1"), &animeav1, "watchlist", "One Piece").is_ok()
+        );
+    }
+
+    #[test]
+    fn provider_menu_maps_labels_to_provider_choices() {
+        assert!(matches!(
+            provider_choice_from_menu("JKAnime"),
+            Some(ProviderChoice::Jkanime)
+        ));
+        assert!(matches!(
+            provider_choice_from_menu("AnimeAV1"),
+            Some(ProviderChoice::AnimeAv1)
+        ));
+        assert!(provider_choice_from_menu("Salir").is_none());
+    }
+
+    #[test]
+    fn provider_flag_is_accepted_after_a_subcommand() {
+        let args = Args::try_parse_from([
+            "ani-es-rs",
+            "watchlist",
+            "add",
+            "Bleach",
+            "--provider",
+            "animeav1",
+        ])
+        .unwrap();
+        assert!(matches!(args.provider, ProviderChoice::AnimeAv1));
+    }
+
+    #[test]
+    fn duplicate_search_titles_resolve_by_selected_slug() {
+        let results = vec![
+            AnimeSearchResult {
+                title: "Series".into(),
+                slug: "https://animeav1.com/media/series-1".into(),
+            },
+            AnimeSearchResult {
+                title: "Series".into(),
+                slug: "https://animeav1.com/media/series-2".into(),
+            },
+        ];
+        let selected =
+            find_selected_result(&results, "Series (https://animeav1.com/media/series-2)").unwrap();
+        assert_eq!(selected.slug, "https://animeav1.com/media/series-2");
+    }
+
+    #[test]
+    fn parses_provider_selection() {
+        let args = Args::try_parse_from(["ani-es-rs", "--provider", "animeav1", "bleach"]).unwrap();
+        assert!(matches!(args.provider, ProviderChoice::AnimeAv1));
+        assert_eq!(args.query.as_deref(), Some("bleach"));
+    }
 
     #[test]
     fn parses_positional_query_and_episode_flags() {

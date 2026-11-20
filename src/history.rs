@@ -11,6 +11,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn update_history_for_provider_records_source_provider() {
+        let mut map = HistoryMap::default();
+        update_history_for_provider(
+            &mut map,
+            "One Piece",
+            12,
+            "00:03:00",
+            Some("https://animeav1.com/media/one-piece".to_string()),
+            "animeav1",
+        );
+        assert_eq!(
+            map.get("One Piece").unwrap().provider.as_deref(),
+            Some("animeav1")
+        );
+    }
+
+    #[test]
+    fn old_history_records_remain_readable_without_provider_metadata() {
+        let entry: HistoryEntry =
+            serde_json::from_str(r#"{"last_cap":4,"progress":"00:12:00","slug":"/bleach/"}"#)
+                .unwrap();
+        assert_eq!(entry.provider, None);
+    }
+
+    #[test]
     fn test_get_last_cap_and_progress() {
         let mut map = HistoryMap::default();
         map.insert(
@@ -19,6 +44,7 @@ mod tests {
                 last_cap: 5,
                 progress: "00:12:34".to_string(),
                 slug: Some("https://jkanime.net/bleach/".to_string()),
+                provider: None,
                 updated_at: Some("2026-01-01 00:00:00".to_string()),
             },
         );
@@ -88,6 +114,35 @@ mod tests {
         );
 
         assert_eq!(latest_anime(&map).as_deref(), Some("Recent series"));
+    }
+
+    #[test]
+    fn latest_anime_for_provider_skips_newer_entries_from_other_providers() {
+        let mut map = HistoryMap::default();
+        map.insert(
+            "Older JK series".to_string(),
+            HistoryEntry {
+                updated_at: Some("2026-01-01 10:00:00".to_string()),
+                ..HistoryEntry::default()
+            },
+        );
+        map.insert(
+            "Newer AnimeAV1 series".to_string(),
+            HistoryEntry {
+                provider: Some("animeav1".to_string()),
+                updated_at: Some("2026-02-01 10:00:00".to_string()),
+                ..HistoryEntry::default()
+            },
+        );
+
+        assert_eq!(
+            latest_anime_for_provider(&map, "jkanime").as_deref(),
+            Some("Older JK series")
+        );
+        assert_eq!(
+            latest_anime_for_provider(&map, "animeav1").as_deref(),
+            Some("Newer AnimeAV1 series")
+        );
     }
 
     #[test]
@@ -327,6 +382,7 @@ fn merge_legacy_history(
                     .unwrap_or(0),
                 progress: progress.unwrap_or_else(|| "00:00:00".to_string()),
                 slug: None,
+                provider: None,
                 updated_at: None,
             },
         );
@@ -366,6 +422,19 @@ pub fn latest_anime(map: &HistoryMap) -> Option<String> {
         .map(|(title, _)| title.clone())
 }
 
+pub fn latest_anime_for_provider(map: &HistoryMap, provider: &str) -> Option<String> {
+    map.iter()
+        .filter(|(_, entry)| entry.provider.as_deref().unwrap_or("jkanime") == provider)
+        .max_by(|(_, a), (_, b)| {
+            a.updated_at
+                .as_deref()
+                .unwrap_or("")
+                .cmp(b.updated_at.as_deref().unwrap_or(""))
+                .then_with(|| a.last_cap.cmp(&b.last_cap))
+        })
+        .map(|(title, _)| title.clone())
+}
+
 pub fn get_progress(map: &HistoryMap, anime: &str) -> String {
     map.get(anime)
         .map(|e| e.progress.clone())
@@ -383,12 +452,24 @@ pub fn update_history(
     progress: &str,
     slug: Option<String>,
 ) {
+    update_history_for_provider(map, anime, cap, progress, slug, "jkanime");
+}
+
+pub fn update_history_for_provider(
+    map: &mut HistoryMap,
+    anime: &str,
+    cap: u32,
+    progress: &str,
+    slug: Option<String>,
+    provider: &str,
+) {
     map.insert(
         anime.to_string(),
         HistoryEntry {
             last_cap: cap,
             progress: progress.to_string(),
             slug,
+            provider: Some(provider.to_string()),
             updated_at: Some(chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()),
         },
     );
