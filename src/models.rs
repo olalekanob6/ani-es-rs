@@ -25,6 +25,8 @@ pub struct HistoryEntry {
     pub progress: String,
     pub slug: Option<String>,
     #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
     pub updated_at: Option<String>,
 }
 
@@ -46,6 +48,8 @@ pub enum WatchlistStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WatchlistEntry {
     pub slug: String,
+    #[serde(default)]
+    pub provider: Option<String>,
     #[serde(default)]
     pub status: WatchlistStatus,
     #[serde(default)]
